@@ -1,0 +1,9 @@
+[package]
+name = "s502-as"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "3.2.12", features = ["cargo"] }
+codespan-reporting = "0.11.1"
+logos = "0.12.1"

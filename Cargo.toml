@@ -1,0 +1,2 @@
+[workspace]
+members = ["s502-as"]
