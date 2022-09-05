@@ -2,10 +2,76 @@
 
 use std::fmt;
 
-use logos::Logos;
+use logos::{Lexer, Logos};
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Literal {
+    Byte(u8),
+    Word(u16),
+    String(String),
+}
+
+/// Parse a number literal using the radix prefix.
+fn lex_number(lex: &mut Lexer<Token>) -> Option<Literal> {
+    // SAFETY [0] and the [1..] on non-base 10 slices will not panic because
+    // this function is only called when the slice contains 1 or more digits.
+    let base = match lex.slice().as_bytes()[0] {
+        b'%' => 2,
+        b'@' => 8,
+        b'$' => 16,
+        _ => 10,
+    };
+    let number_string = if base == 10 {
+        &lex.slice()
+    } else {
+        &lex.slice()[1..]
+    };
+
+    // numbers that fit into a byte can be padded with 0s to take a word.
+    let is_word = match base {
+        2 => {
+            if number_string.len() > 16 {
+                return None;
+            } else {
+                number_string.len() > 8
+            }
+        }
+        8 => {
+            if number_string.len() > 6 {
+                return None;
+            } else {
+                number_string.len() > 3
+            }
+        }
+        10 => {
+            if number_string.len() > 5 {
+                return None;
+            } else {
+                number_string.len() > 3
+            }
+        }
+        _ => {
+            if number_string.len() > 4 {
+                return None;
+            } else {
+                number_string.len() > 2
+            }
+        }
+    };
+
+    u16::from_str_radix(number_string, base)
+        .map(|number| {
+            if number > 255 || is_word {
+                Literal::Word(number)
+            } else {
+                Literal::Byte(number as u8)
+            }
+        })
+        .ok()
+}
 
 /// Tokens of the assembly language.
-#[derive(Clone, Logos)]
+#[derive(Clone, Debug, Logos, PartialEq)]
 pub enum Token {
     #[token("adc", priority = 2, ignore(case))]
     Adc,
@@ -145,14 +211,18 @@ pub enum Token {
     Global,
     #[token(".")]
     Period,
-    #[regex("\"\\w*\"", |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
-    String(String),
+    #[regex("\\$[0-9a-fA-F]+", lex_number)]
+    #[regex("%[0-1]+", lex_number)]
+    #[regex("@[0-7]+", lex_number)]
+    #[regex("[0-9]+", lex_number)]
+    #[regex("\"\\w*\"", |lex| Literal::String(lex.slice()[1..lex.slice().len()-1].to_string()))]
+    Literal(Literal),
     #[regex("[a-zA-Z][a-zA-Z_]*", |lex| lex.slice().to_string())]
     Ident(String),
     #[regex("\n")]
     Eol,
     #[error]
-    #[regex("[*].*\n")]
+    #[regex("[*].*\n", logos::skip)]
     #[regex(r"[ \t]+", logos::skip)]
     Error,
 }
@@ -227,9 +297,13 @@ impl fmt::Display for Token {
             Self::A => write!(f, "`A`"),
             Self::X => write!(f, "`X`"),
             Self::Y => write!(f, "`Y`"),
-            Self::Global => write!(f, "`!!`"),
+            Self::Global => write!(f, "`!`"),
             Self::Period => write!(f, "`.`"),
-            Self::String(string) => write!(f, "`\"{string}\"`"),
+            Self::Literal(op) => match op {
+                Literal::Byte(byte) => write!(f, "byte `{}`", byte),
+                Literal::Word(word) => write!(f, "word `{}`", word),
+                Literal::String(string) => write!(f, "`\"{string}\"`"),
+            },
             Self::Ident(ident) => write!(f, "`{ident}`"),
             Self::Eol => write!(f, "`<end of line>`"),
             Self::Error => write!(f, "`ERROR`"),
@@ -237,8 +311,78 @@ impl fmt::Display for Token {
     }
 }
 
-impl fmt::Debug for Token {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lexes_binary_numbers() {
+        let source = "%0 %10101 %000000111 %1011000010001111".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0b0)));
+        assert_eq!(
+            lexer.next().unwrap(),
+            Token::Literal(Literal::Byte(0b10101))
+        );
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0b111)));
+        assert_eq!(
+            lexer.next().unwrap(),
+            Token::Literal(Literal::Word(0b1011_0000_1000_1111))
+        );
+    }
+
+    #[test]
+    fn lexes_octal_numbers() {
+        let source = "@0 @273 @00101 @473".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0o0)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0o273)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0o101)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0o473)));
+    }
+
+    #[test]
+    fn lexes_decimal_numbers() {
+        let source = "0 2 255 256 65535".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(2)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(255)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(256)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(65535)));
+    }
+
+    #[test]
+    fn lexes_hex_numbers() {
+        let source = "$0 $3D $7F $101 $beef".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0x3D)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0x7F)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0x101)));
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0xbeef)));
+    }
+
+    #[test]
+    fn rejects_bad_numbers() {
+        let source = "%11000100010001000 @401201 000000 $2D3C8".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert!(lexer.all(|token| token == Token::Error));
+    }
+
+    #[test]
+    fn lexes_string() {
+        let source = "\"test\"".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(
+            lexer.next().unwrap(),
+            Token::Literal(Literal::String("test".to_string()))
+        );
     }
 }
