@@ -1,11 +1,12 @@
 use std::ops::Range;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Visibility {
     Global,
     Object,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Label {
     pub name: String,
     pub span: Range<usize>,
@@ -13,6 +14,7 @@ pub struct Label {
     pub sublabels: Vec<SubLabel>,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct SubLabel {
     pub name: String,
     pub span: Range<usize>,

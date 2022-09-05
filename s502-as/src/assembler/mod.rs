@@ -1,5 +1,8 @@
 //! Parser that builds a syntax tree that represents the input assembly.
 
+#[cfg(test)]
+mod tests;
+
 use std::iter::Peekable;
 
 use super::lexer::Token;
@@ -53,7 +56,6 @@ impl Assembler {
 
     fn parse_line(&mut self, lexer: &mut SpannedLexer) -> Result<bool, AssemblerError> {
         self.parse_label(lexer).map(|_| false)
-        // Ok(false)
     }
 
     fn parse_label(&mut self, lexer: &mut SpannedLexer) -> Result<(), AssemblerError> {
@@ -74,7 +76,7 @@ impl Assembler {
                 let attributes = (Some(span.clone()), None);
                 (token, span) = lexer.next().ok_or(AssemblerError {
                     span,
-                    message: "unexpected end of file, expected a label".to_string(),
+                    message: "Unexpected end of file, expected a label".to_string(),
                     note: None,
                 })?;
                 attributes
@@ -83,7 +85,7 @@ impl Assembler {
                 let attributes = (None, Some(span.clone()));
                 (token, span) = lexer.next().ok_or(AssemblerError {
                     span,
-                    message: "unexpected end of file, expected a label".to_string(),
+                    message: "Unexpected end of file, expected a label".to_string(),
                     note: None,
                 })?;
                 attributes
@@ -96,8 +98,8 @@ impl Assembler {
             _ => {
                 return Err(AssemblerError {
                     span,
-                    message: format!("unexpected token {}", token),
-                    note: Some("expected a label".to_string()),
+                    message: format!("Unexpected token {}", token),
+                    note: Some("Expected a label".to_string()),
                 });
             }
         };
@@ -107,15 +109,16 @@ impl Assembler {
                 .last_mut()
                 .ok_or(AssemblerError {
                     span: period_span.start..span.end,
-                    message: format!(
-                        "No top level label has been created for sublabel to go under."
-                    ),
-                    note: None,
+                    message: format!("Sublabel without top-level label"),
+                    note: Some(format!(
+                        "No top level label has been created for `{}` to go under",
+                        identifier
+                    )),
                 })?
                 .sublabels
                 .push(SubLabel {
                     name: identifier,
-                    span,
+                    span: period_span.start..span.end,
                 });
         } else {
             self.labels.push(Label {
