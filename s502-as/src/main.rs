@@ -1,8 +1,9 @@
 #[macro_use]
 extern crate indoc;
 
-use std::fs;
+use std::{collections::HashMap, fs};
 
+use ast::{Include, Location};
 use clap::{arg, command};
 use codespan_reporting::{
     diagnostic::{Diagnostic, Label},
@@ -101,18 +102,64 @@ fn main() {
             Ok(source) => source,
         };
 
-        let (file_id, program_result) = parser::parse_program(file_name, source, &mut files);
+        // Stack of included files used to prevent recursion.
+        // Start with an entry including the top level file and say the command line
+        // included it in case another file tries to include it.
+        let mut include_stack = vec![Include {
+            included: file_name.clone(),
+            loc: Location {
+                span: 0..1,
+                name: "<command line>".to_string(),
+            },
+        }];
+
+        // Table associating file names with their file IDs.
+        let mut id_table = HashMap::<String, usize>::new();
+
+        let (file_id, program_result) = parser::parse_program(
+            file_name.clone(),
+            source,
+            &mut files,
+            &mut include_stack,
+            &mut id_table,
+        );
+
+        // Insert the toplevel file now after getting its ID.
+        id_table.insert(file_name, file_id);
+        // And make command line point to it as well because it's used as the key when
+        // looking up who included the top level file..
+        id_table.insert("<command line>".to_string(), file_id);
+
         match program_result {
             // Report errors if there are any.
             Err(errors) => {
                 for error in errors {
-                    let mut label = Label::primary(file_id, error.span);
-                    if let Some(note) = error.note {
-                        label = label.with_message(note);
+                    // Create labels from notes.
+                    let mut labels = vec![];
+                    let mut notes = error.labels.into_iter();
+
+                    // The first will be primary.
+                    if let Some((loc, message)) = notes.next() {
+                        let mut label = Label::primary(id_table[&loc.name], loc.span);
+                        if let Some(message) = message {
+                            label = label.with_message(message);
+                        }
+                        labels.push(label);
                     }
+
+                    // And the rest secondary.
+                    notes.for_each(|(loc, message)| {
+                        let mut label = Label::secondary(id_table[&loc.name], loc.span);
+                        if let Some(message) = message {
+                            label = label.with_message(message);
+                        }
+                        labels.push(label);
+                    });
+
+                    // Then create diagnostic message from it.
                     let diagnostic = Diagnostic::error()
                         .with_message(error.message)
-                        .with_labels(vec![label]);
+                        .with_labels(labels);
 
                     let _ = term::emit(
                         &mut stderr_writer.lock(),
@@ -120,6 +167,18 @@ fn main() {
                         &files,
                         &diagnostic,
                     );
+
+                    // And create a second help diagnostic if one was given.
+                    if let Some(note) = error.help {
+                        let diagnostic = Diagnostic::help().with_message(note);
+
+                        let _ = term::emit(
+                            &mut stderr_writer.lock(),
+                            &codespan_config,
+                            &files,
+                            &diagnostic,
+                        );
+                    }
                 }
             }
             Ok(_program) => {

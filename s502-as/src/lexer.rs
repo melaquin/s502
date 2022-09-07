@@ -4,12 +4,7 @@ use std::fmt;
 
 use logos::{Lexer, Logos};
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Literal {
-    Byte(u8),
-    Word(u16),
-    String(String),
-}
+use crate::ast::Literal;
 
 /// Parse a number literal using the radix prefix.
 fn lex_number(lex: &mut Lexer<Token>) -> Option<Literal> {
@@ -199,8 +194,6 @@ pub enum Token {
     Org,
     #[token("sct", priority = 2, ignore(case))]
     Sct,
-    #[token("txt", priority = 2, ignore(case))]
-    Txt,
     #[token("a", priority = 2, ignore(case))]
     A,
     #[token("x", priority = 2, ignore(case))]
@@ -215,7 +208,7 @@ pub enum Token {
     #[regex("%[0-1]+", lex_number)]
     #[regex("@[0-7]+", lex_number)]
     #[regex("[0-9]+", lex_number)]
-    #[regex("\"\\w*\"", |lex| Literal::String(lex.slice()[1..lex.slice().len()-1].to_string()))]
+    #[regex(r#""(\\[nt0"\\]|[^"\\])*""#, |lex| Literal::String(lex.slice()[1..lex.slice().len()-1].to_string()))]
     Literal(Literal),
     #[regex("[a-zA-Z][a-zA-Z_]*", |lex| lex.slice().to_string())]
     Ident(String),
@@ -293,7 +286,6 @@ impl fmt::Display for Token {
             Self::Inl => write!(f, "`inl`"),
             Self::Org => write!(f, "`org`"),
             Self::Sct => write!(f, "`sct`"),
-            Self::Txt => write!(f, "`txt`"),
             Self::A => write!(f, "`A`"),
             Self::X => write!(f, "`X`"),
             Self::Y => write!(f, "`Y`"),
@@ -306,7 +298,7 @@ impl fmt::Display for Token {
             },
             Self::Ident(ident) => write!(f, "`{ident}`"),
             Self::Eol => write!(f, "`<end of line>`"),
-            Self::Error => write!(f, "`ERROR`"),
+            Self::Error => write!(f, "`UNRECOGNIZED`"),
         }
     }
 }

@@ -7,9 +7,10 @@ use crate::lexer::Token;
 #[test]
 fn plain() {
     let source = "mylabel".to_string();
+    let source_name = "plain test".to_string();
     let mut lexer = Token::lexer(&source).spanned().peekable();
 
-    let label = parse_label(&mut lexer);
+    let label = parse_label(&mut lexer, &source_name);
     assert!(label.is_ok());
 
     assert_eq!(
@@ -26,9 +27,10 @@ fn plain() {
 #[test]
 fn global() {
     let source = "!yourlabel".to_string();
+    let source_name = "global test".to_string();
     let mut lexer = Token::lexer(&source).spanned().peekable();
 
-    let label = parse_label(&mut lexer);
+    let label = parse_label(&mut lexer, &source_name);
     assert!(label.is_ok());
 
     assert_eq!(
@@ -45,9 +47,10 @@ fn global() {
 #[test]
 fn sublabel() {
     let source = ".sublabel".to_string();
+    let source_name = "sublabel test".to_string();
     let mut lexer = Token::lexer(&source).spanned().peekable();
 
-    let sublabel = parse_label(&mut lexer);
+    let sublabel = parse_label(&mut lexer, &source_name);
     assert!(sublabel.is_ok());
 
     assert_eq!(
@@ -62,17 +65,24 @@ fn sublabel() {
 #[test]
 fn no_ident_after_global() {
     let source = "!adc".to_string();
+    let source_name = "no ident after global test".to_string();
     let mut lexer = Token::lexer(&source).spanned().peekable();
 
-    let parse_result = parse_label(&mut lexer);
+    let parse_result = parse_label(&mut lexer, &source_name);
     assert!(parse_result.is_err());
 
     assert_eq!(
         parse_result.unwrap_err(),
         AssemblerError {
-            span: 1..4,
             message: "Unexpected token `adc`".to_string(),
-            note: Some("Expected a label".to_string()),
+            labels: vec![(
+                Location {
+                    span: 1..4,
+                    name: "no ident after global test".to_string()
+                },
+                Some("Expected a label".to_string())
+            )],
+            help: None,
         }
     );
 }
@@ -80,17 +90,24 @@ fn no_ident_after_global() {
 #[test]
 fn no_ident_after_period() {
     let source = ".dfb".to_string();
+    let source_name = "no ident after period test".to_string();
     let mut lexer = Token::lexer(&source).spanned().peekable();
 
-    let parse_result = parse_label(&mut lexer);
+    let parse_result = parse_label(&mut lexer, &source_name);
     assert!(parse_result.is_err());
 
     assert_eq!(
         parse_result.unwrap_err(),
         AssemblerError {
-            span: 1..4,
             message: "Unexpected token `dfb`".to_string(),
-            note: Some("Expected a label".to_string()),
+            labels: vec![(
+                Location {
+                    span: 1..4,
+                    name: "no ident after period test".to_string()
+                },
+                Some("Expected a label".to_string())
+            )],
+            help: None,
         }
     );
 }
