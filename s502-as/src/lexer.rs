@@ -4,7 +4,13 @@ use std::fmt;
 
 use logos::{Lexer, Logos};
 
-use crate::ast::Literal;
+/// A literal number or string.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Literal {
+    Byte(u8),
+    Word(u16),
+    String(String),
+}
 
 /// Parse a number literal using the radix prefix.
 fn lex_number(lex: &mut Lexer<Token>) -> Option<Literal> {

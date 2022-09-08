@@ -1,16 +1,35 @@
-use crate::{ast::*, error::AssemblerError};
+use std::collections::HashMap;
+
+use crate::{ast::*, error::AssemblerError, parser::ParserContext};
+use codespan_reporting::files::SimpleFiles;
 use logos::Logos;
 
-use super::super::parse_label;
 use crate::lexer::Token;
 
 #[test]
 fn plain() {
     let source = "mylabel".to_string();
     let source_name = "plain test".to_string();
-    let mut lexer = Token::lexer(&source).spanned().peekable();
+    let mut files = SimpleFiles::<String, String>::new();
+    let mut include_stack = vec![Include {
+        included: source_name.clone(),
+        loc: Location {
+            span: 0..1,
+            name: "<test harness>".to_string(),
+        },
+    }];
+    let mut id_table = HashMap::<String, usize>::new();
+    let lexer = Token::lexer(&source).spanned().peekable();
 
-    let label = parse_label(&mut lexer, &source_name);
+    let mut parser_context = ParserContext::new(
+        source_name.clone(),
+        lexer,
+        &mut files,
+        &mut include_stack,
+        &mut id_table,
+    );
+
+    let label = parser_context.parse_label();
     assert!(label.is_ok());
 
     assert_eq!(
@@ -28,9 +47,26 @@ fn plain() {
 fn global() {
     let source = "!yourlabel".to_string();
     let source_name = "global test".to_string();
-    let mut lexer = Token::lexer(&source).spanned().peekable();
+    let mut files = SimpleFiles::<String, String>::new();
+    let mut include_stack = vec![Include {
+        included: source_name.clone(),
+        loc: Location {
+            span: 0..1,
+            name: "<test harness>".to_string(),
+        },
+    }];
+    let mut id_table = HashMap::<String, usize>::new();
+    let lexer = Token::lexer(&source).spanned().peekable();
 
-    let label = parse_label(&mut lexer, &source_name);
+    let mut parser_context = ParserContext::new(
+        source_name.clone(),
+        lexer,
+        &mut files,
+        &mut include_stack,
+        &mut id_table,
+    );
+
+    let label = parser_context.parse_label();
     assert!(label.is_ok());
 
     assert_eq!(
@@ -48,9 +84,26 @@ fn global() {
 fn sublabel() {
     let source = ".sublabel".to_string();
     let source_name = "sublabel test".to_string();
-    let mut lexer = Token::lexer(&source).spanned().peekable();
+    let mut files = SimpleFiles::<String, String>::new();
+    let mut include_stack = vec![Include {
+        included: source_name.clone(),
+        loc: Location {
+            span: 0..1,
+            name: "<test harness>".to_string(),
+        },
+    }];
+    let mut id_table = HashMap::<String, usize>::new();
+    let lexer = Token::lexer(&source).spanned().peekable();
 
-    let sublabel = parse_label(&mut lexer, &source_name);
+    let mut parser_context = ParserContext::new(
+        source_name.clone(),
+        lexer,
+        &mut files,
+        &mut include_stack,
+        &mut id_table,
+    );
+
+    let sublabel = parser_context.parse_label();
     assert!(sublabel.is_ok());
 
     assert_eq!(
@@ -66,9 +119,26 @@ fn sublabel() {
 fn no_ident_after_global() {
     let source = "!adc".to_string();
     let source_name = "no ident after global test".to_string();
-    let mut lexer = Token::lexer(&source).spanned().peekable();
+    let mut files = SimpleFiles::<String, String>::new();
+    let mut include_stack = vec![Include {
+        included: source_name.clone(),
+        loc: Location {
+            span: 0..1,
+            name: "<test harness>".to_string(),
+        },
+    }];
+    let mut id_table = HashMap::<String, usize>::new();
+    let lexer = Token::lexer(&source).spanned().peekable();
 
-    let parse_result = parse_label(&mut lexer, &source_name);
+    let mut parser_context = ParserContext::new(
+        source_name.clone(),
+        lexer,
+        &mut files,
+        &mut include_stack,
+        &mut id_table,
+    );
+
+    let parse_result = parser_context.parse_label();
     assert!(parse_result.is_err());
 
     assert_eq!(
@@ -91,9 +161,26 @@ fn no_ident_after_global() {
 fn no_ident_after_period() {
     let source = ".dfb".to_string();
     let source_name = "no ident after period test".to_string();
-    let mut lexer = Token::lexer(&source).spanned().peekable();
+    let mut files = SimpleFiles::<String, String>::new();
+    let mut include_stack = vec![Include {
+        included: source_name.clone(),
+        loc: Location {
+            span: 0..1,
+            name: "<test harness>".to_string(),
+        },
+    }];
+    let mut id_table = HashMap::<String, usize>::new();
+    let lexer = Token::lexer(&source).spanned().peekable();
 
-    let parse_result = parse_label(&mut lexer, &source_name);
+    let mut parser_context = ParserContext::new(
+        source_name.clone(),
+        lexer,
+        &mut files,
+        &mut include_stack,
+        &mut id_table,
+    );
+
+    let parse_result = parser_context.parse_label();
     assert!(parse_result.is_err());
 
     assert_eq!(

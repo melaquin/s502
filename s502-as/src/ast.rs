@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use super::lexer::Literal;
+
 #[derive(Debug, PartialEq)]
 /// Information for retrieving an except from the source code.
 pub struct Location {
@@ -24,8 +26,28 @@ pub struct Program {
     pub lines: Vec<Line>,
 }
 
+pub struct Line {
+    /// Label giving the address of this
+    /// line a meaningful name
+    pub label: Option<Label>,
+    /// What to do for this line.
+    pub action: Option<Action>,
+}
+
+/// Something for either the target CPU or the assembler to do.
+pub enum Action {
+    /// An assembler directive or CPU instruction.
+    Instruction(Mnemonic, Option<Operand>),
+    /// This tells the next stage that the following lines
+    /// came from the file with this ID.
+    PushInclude(usize),
+    /// This tells the next stage that the most recently
+    /// included file has ended.
+    PopInclude,
+}
+
 /// Representatioon of one line of assembly.
-pub enum Line {
+pub enum OldLine {
     Instruction(Instruction),
     /// This tells the next stage that the foollowing lines
     /// came from the file with this ID.
@@ -70,22 +92,22 @@ pub struct SubLabel {
     pub span: Range<usize>,
 }
 
+/// An instruction or directive to execute.
 pub enum Mnemonic {
-    Directive(Directive),
+    Dfb,
+    Dfw,
+    Equ,
+    Inl,
+    // TODO implied instructions don't need an operand
+    // so don't try to parse comment as operand, use LUT
+    Hlt,
+    Org,
+    Sct,
 }
 
-pub enum Directive {
-    Dfb(Operand),
-    Dfw(Operand),
-}
-
+/// The parsed instruction operand.
 pub enum Operand {
     Literal(Literal),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Literal {
-    Byte(u8),
-    Word(u16),
-    String(String),
+    // TODO probalby don't make lexer create a Literal
+    // because the parser should also create a Reference literal
 }

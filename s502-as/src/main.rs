@@ -14,6 +14,8 @@ use codespan_reporting::{
         Config,
     },
 };
+use lexer::Token;
+use logos::Logos;
 
 mod ast;
 mod error;
@@ -102,6 +104,8 @@ fn main() {
             Ok(source) => source,
         };
 
+        // Build a context for the parser.
+
         // Stack of included files used to prevent recursion.
         // Start with an entry including the top level file and say the command line
         // included it in case another file tries to include it.
@@ -115,14 +119,23 @@ fn main() {
 
         // Table associating file names with their file IDs.
         let mut id_table = HashMap::<String, usize>::new();
+        // A lexer of the source for the parser to use.
+        let mut lexer = Token::lexer(&source).spanned().peekable();
 
-        let (file_id, program_result) = parser::parse_program(
+        let parser_context = parser::ParserContext::new(
             file_name.clone(),
-            source,
+            lexer,
             &mut files,
             &mut include_stack,
             &mut id_table,
         );
+
+        let program_result = parser_context.parse_program();
+        let file_id = if id_table.contains_key(&file_name) {
+            id_table[&file_name]
+        } else {
+            files.add(file_name.clone(), source)
+        };
 
         // Insert the toplevel file now after getting its ID.
         id_table.insert(file_name, file_id);
