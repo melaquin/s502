@@ -1,19 +1,62 @@
 use std::ops::Range;
 
-use super::lexer::Literal;
+// TODO rename lexer's literal to immediate,
+// make new Literal as an AST node,
+// then make lexer a private mod
+use crate::parser::lexer::Literal;
 
-#[derive(Debug, PartialEq)]
-/// Information for retrieving an except from the source code.
-pub struct Location {
-    /// Where in the source.
+/// An AST node with associated span in the source file.
+/// This does not contain a Location because this will
+/// be used by the generation stage which will get the
+/// current file's ID from Item::PushInclude, while
+/// Location is used in reporting errors which prevents
+/// the generation stage from running.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spanned<T> {
+    /// The node value.
+    pub val: T,
+    /// Where the node is in the source.
     pub span: Range<usize>,
-    /// Which file. This is used as a map key to find the
-    /// corresponding file ID.
+}
+
+impl<T> Spanned<T> {
+    pub fn new(data: (T, Range<usize>)) -> Self {
+        Self {
+            val: data.0,
+            span: data.1,
+        }
+    }
+}
+
+/// Convenience for easily working with the node.
+impl<T> std::ops::Deref for Spanned<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.val
+    }
+}
+
+/// Convenience for easily working with the node.
+impl<T> std::ops::DerefMut for Spanned<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.val
+    }
+}
+
+/// Information for retrieving an except from the
+/// source code when reporting a parsing error.
+#[derive(Debug, PartialEq)]
+pub struct Location {
+    /// Where in the source to point to.
+    pub span: Range<usize>,
+    /// Which file. This is used as a map key
+    /// to find the corresponding file ID.
     pub name: String,
 }
 
-#[derive(PartialEq)]
 /// A file inclusion encountered while parsing.
+#[derive(PartialEq)]
 pub struct Include {
     /// The file being included as it appears in the source.
     pub included: String,
@@ -22,43 +65,20 @@ pub struct Include {
 }
 
 /// Representation of an assembly file.
-pub struct Program {
-    pub lines: Vec<Line>,
-}
+pub type Program = Vec<Item>;
 
-pub struct Line {
-    /// Label giving the address of this
-    /// line a meaningful name
-    pub label: Option<Label>,
-    /// What to do for this line.
-    pub action: Option<Action>,
-}
-
-/// Something for either the target CPU or the assembler to do.
-pub enum Action {
-    /// An assembler directive or CPU instruction.
-    Instruction(Mnemonic, Option<Operand>),
-    /// This tells the next stage that the following lines
-    /// came from the file with this ID.
-    PushInclude(usize),
-    /// This tells the next stage that the most recently
-    /// included file has ended.
-    PopInclude,
-}
-
-/// Representatioon of one line of assembly.
-pub enum OldLine {
+#[derive(Debug, PartialEq)]
+pub enum Item {
+    /// Tell the assembler stage to mark
+    /// the current address with a label.
+    Label(Label),
+    /// Either a directive or instruction.
     Instruction(Instruction),
-    /// This tells the next stage that the foollowing lines
-    /// came from the file with this ID.
+    /// The parser read in an included file with the
+    /// given ID, and the following Items belong to it.
     PushInclude(usize),
-    /// This tells the next stage that the most recently
-    /// included file has ended.
+    // The most recently included file has ended, go back up a level.
     PopInclude,
-}
-
-pub struct Instruction {
-    pub label: Option<Label>,
 }
 
 /// A label that appears at the beginning of a line.
@@ -92,22 +112,37 @@ pub struct SubLabel {
     pub span: Range<usize>,
 }
 
-/// An instruction or directive to execute.
+/// A directive or CPU instruction.
+#[derive(Debug, PartialEq)]
+pub struct Instruction {
+    /// What the assembler or CPU should do.
+    pub mnemonic: Spanned<Mnemonic>,
+    /// The operand that the mnemonic may require.
+    pub operand: Option<Spanned<Operand>>,
+}
+
+/// An assembler or CPU instruction to execute.
+#[derive(Clone, Debug, PartialEq)]
 pub enum Mnemonic {
     Dfb,
     Dfw,
     Equ,
     Inl,
-    // TODO implied instructions don't need an operand
-    // so don't try to parse comment as operand, use LUT
     Hlt,
     Org,
     Sct,
 }
 
+impl Mnemonic {
+    pub fn is_implied(&self) -> bool {
+        self == &Mnemonic::Hlt
+    }
+}
+
 /// The parsed instruction operand.
+#[derive(Debug, PartialEq)]
 pub enum Operand {
     Literal(Literal),
-    // TODO probalby don't make lexer create a Literal
+    // TODO don't make lexer create a Literal
     // because the parser should also create a Reference literal
 }

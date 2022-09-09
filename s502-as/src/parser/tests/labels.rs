@@ -2,9 +2,6 @@ use std::collections::HashMap;
 
 use crate::{ast::*, error::AssemblerError, parser::ParserContext};
 use codespan_reporting::files::SimpleFiles;
-use logos::Logos;
-
-use crate::lexer::Token;
 
 #[test]
 fn plain() {
@@ -19,11 +16,10 @@ fn plain() {
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
-    let lexer = Token::lexer(&source).spanned().peekable();
 
     let mut parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source,
         &mut files,
         &mut include_stack,
         &mut id_table,
@@ -56,11 +52,10 @@ fn global() {
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
-    let lexer = Token::lexer(&source).spanned().peekable();
 
     let mut parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source,
         &mut files,
         &mut include_stack,
         &mut id_table,
@@ -93,11 +88,10 @@ fn sublabel() {
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
-    let lexer = Token::lexer(&source).spanned().peekable();
 
     let mut parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source,
         &mut files,
         &mut include_stack,
         &mut id_table,
@@ -128,11 +122,10 @@ fn no_ident_after_global() {
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
-    let lexer = Token::lexer(&source).spanned().peekable();
 
     let mut parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source,
         &mut files,
         &mut include_stack,
         &mut id_table,
@@ -170,11 +163,10 @@ fn no_ident_after_period() {
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
-    let lexer = Token::lexer(&source).spanned().peekable();
 
     let mut parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source,
         &mut files,
         &mut include_stack,
         &mut id_table,

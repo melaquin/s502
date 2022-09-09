@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 
 use codespan_reporting::files::SimpleFiles;
-use logos::Logos;
 
 use crate::{
     ast::{Include, Location},
-    lexer::Token,
     parser::ParserContext,
 };
 
@@ -22,11 +20,10 @@ fn empty_program() {
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
-    let lexer = Token::lexer(&source).spanned().peekable();
 
     let parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source,
         &mut files,
         &mut include_stack,
         &mut id_table,
@@ -35,7 +32,7 @@ fn empty_program() {
     let program_result = parser_context.parse_program();
 
     assert!(program_result.is_ok());
-    assert!(program_result.unwrap().lines.is_empty());
+    assert!(program_result.unwrap().is_empty());
 }
 
 #[test]
@@ -52,11 +49,10 @@ fn two_programs() {
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
-    let lexer = Token::lexer(&source_1).spanned().peekable();
 
     let parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source_1,
         &mut files,
         &mut include_stack,
         &mut id_table,
@@ -64,11 +60,9 @@ fn two_programs() {
 
     let program_result_1 = parser_context.parse_program();
 
-    let lexer = Token::lexer(&source_2).spanned().peekable();
-
     let parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source_2,
         &mut files,
         &mut include_stack,
         &mut id_table,

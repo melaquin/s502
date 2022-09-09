@@ -1,18 +1,16 @@
 //! Parser that builds a syntax tree that represents the input assembly.
 
+pub mod lexer;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, convert::TryFrom, fs, iter::Peekable, ops::Range};
+use std::{collections::HashMap, convert::TryFrom, fs, iter::Peekable, ops::Range, path::Path};
 
 use codespan_reporting::files::SimpleFiles;
 use logos::{Logos, SpannedIter};
 
-use crate::{
-    ast::*,
-    error::*,
-    lexer::{Literal, Token},
-};
+use crate::{ast::*, error::*};
+use lexer::{Literal, Token};
 
 pub type SpannedLexer<'source> = Peekable<SpannedIter<'source, Token>>;
 
@@ -29,20 +27,18 @@ pub struct ParserContext<'source, 'context> {
 impl<'source, 'context> ParserContext<'source, 'context> {
     pub fn new(
         file_name: String,
-        lexer: SpannedLexer<'source>,
+        source: &'source String,
         files: &'context mut SimpleFiles<String, String>,
         include_stack: &'context mut Vec<Include>,
         id_table: &'context mut HashMap<String, usize>,
     ) -> Self {
         Self {
             file_name,
-            lexer,
+            lexer: Token::lexer(source).spanned().peekable(),
             files,
             include_stack,
             id_table,
-            program: Program {
-                lines: Vec::with_capacity(256),
-            },
+            program: Program::with_capacity(256),
             errors: Vec::with_capacity(8),
         }
     }
@@ -51,19 +47,11 @@ impl<'source, 'context> ParserContext<'source, 'context> {
         while self.lexer.peek().is_some() {
             match self.parse_line() {
                 // The line was empty, go on to the next one.
-                Ok(None) => continue,
-                Ok(Some(line)) => self.program.lines.push(line),
+                Ok(()) => continue,
                 Err(error) => self.errors.push(error),
             }
         }
 
-        // Add it to the files only if it hasn't been included before to prevent duplicates,
-        // otherwise return hte existing ID.
-        // if context.id_table.contains_key(&context.file_name) {
-        //     context.id_table[&context.file_name]
-        // } else {
-        //     context.files.add(context.file_name, source)
-        // },
         if self.errors.len() > 0 {
             Err(self.errors)
         } else {
@@ -71,114 +59,14 @@ impl<'source, 'context> ParserContext<'source, 'context> {
         }
     }
 
-    // pub fn parse_program(
-    //     file_name: String,
-    //     source: String,
-    //     files: &mut SimpleFiles<String, String>,
-    //     include_path: &mut Vec<Include>,
-    //     id_table: &mut HashMap<String, usize>,
-    // ) -> (usize, Result<Program, Vec<AssemblerError>>) {
-    //     let mut lexer = Token::lexer(&source).spanned().peekable();
-
-    //     let mut errors = Vec::with_capacity(8);
-    //     let mut program = Program {
-    //         lines: Vec::with_capacity(256),
-    //     };
-
-    //     // Assemble the program one line at a time. Stop when there are no more tokens.
-    //     while lexer.peek().is_some() {
-    //         // TODO move this to parse_mnemonic
-    //         // // Handle includes specially, they cannot start with a label.
-    //         // if let Some((Token::Inl, _)) = lexer.peek() {
-    //         //     let (_, inl_span) = lexer.next().unwrap();
-    //         //     let (included_id, parse_result) =
-    //         //         handle_include(&mut lexer, inl_span, files, include_path, id_table);
-
-    //         //     // Push included file's ID before its code so the next stage knows what file it's in.
-    //         //     if let Some(id) = included_id {
-    //         //         program.lines.push(OldLine::PushInclude(id));
-    //         //     }
-    //         //     match parse_result {
-    //         //         Ok(mut included_program) => program.lines.append(&mut included_program.lines),
-    //         //         Err(mut included_errors) => errors.append(&mut included_errors),
-    //         //     }
-    //         //     // And the next stage needs to know when the included file ends.
-    //         //     if included_id.is_some() {
-    //         //         program.lines.push(OldLine::PopInclude);
-    //         //     }
-    //         //     skip_to_eol(&mut lexer);
-    //         //     continue;
-    //         // }
-
-    //         match parse_line(&mut lexer, &file_name) {
-    //             // The line was empty, go on to the next one.
-    //             Ok(None) => continue,
-    //             Ok(Some(line)) => program.lines.push(line),
-    //             Err(error) => errors.push(error),
-    //         }
-    //     }
-
-    //     (
-    //         // Add it to the files only if it hasn't been included before to prevent duplicates,
-    //         // otherwise return hte existing ID.
-    //         if id_table.contains_key(&file_name) {
-    //             id_table[&file_name]
-    //         } else {
-    //             files.add(file_name, source)
-    //         },
-    //         if errors.len() > 0 {
-    //             Err(errors)
-    //         } else {
-    //             Ok(program)
-    //         },
-    //     )
-    // }
-
-    /// parse the inl directive, preventing circular inclusion and parsing the included file.
+    /// Read and parse an included file, preventing circular inclusion.
+    /// Returns the included file ID (if reading was successful) and
+    /// the result of parsing the included file.
     fn handle_include(
         &mut self,
         to_include_name: String,
         to_include_span: Range<usize>,
     ) -> (Option<usize>, Result<Program, Vec<AssemblerError>>) {
-        // Expect to see a string literal after the inl directive.
-        // let (to_include_name, to_include_span) = match context.lexer.next() {
-        //     None => {
-        //         return (
-        //             None,
-        //             Err(vec![AssemblerError {
-        //                 message: "Unexpected end of file, expected a string".to_string(),
-        //                 labels: vec![(
-        //                     Location {
-        //                         span: to_include_span,
-        //                         // SAFETY Last can be unwrapped because the stack has at least one member
-        //                         // before parse_program and subsequently handle_include are called.
-        //                         name: context.include_stack.last().unwrap().included.clone(),
-        //                     },
-        //                     None,
-        //                 )],
-        //                 help: None,
-        //             }]),
-        //         );
-        //     }
-        //     Some((Token::Literal(Literal::String(file_name)), name_span)) => (file_name, name_span),
-        //     Some((token, span)) => {
-        //         return (
-        //             None,
-        //             Err(vec![AssemblerError {
-        //                 message: format!("Unexpected token {}", token),
-        //                 labels: vec![(
-        //                     Location {
-        //                         span,
-        //                         name: context.include_stack.last().unwrap().included.clone(),
-        //                     },
-        //                     Some("Expected a string".to_string()),
-        //                 )],
-        //                 help: None,
-        //             }]),
-        //         );
-        //     }
-        // };
-
         // Check if the file has already been parsed. If it has then it would loop back
         // to this file and cause infinite recursion.
         if let Some(include) = self
@@ -247,11 +135,9 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             },
         });
 
-        let included_lexer = Token::lexer(&included_source).spanned().peekable();
-
         let included_context = ParserContext::new(
             to_include_name.clone(),
-            included_lexer,
+            &included_source,
             self.files,
             self.include_stack,
             self.id_table,
@@ -292,21 +178,24 @@ impl<'source, 'context> ParserContext<'source, 'context> {
     }
 
     /// Parse a line including the label, mnemonic, and operand.
-    fn parse_line(&mut self) -> Result<Option<Line>, AssemblerError> {
+    fn parse_line(&mut self) -> Result<(), AssemblerError> {
         // Label appears first.
         let label = self.parse_label()?;
-        let action = self.parse_action()?;
+        // Add it to the program right away because if the action is an include, then
+        // parse_instruction will put the included file in the program before returning.
+        if let Some(label) = label {
+            self.program.push(Item::Label(label));
+        }
+
+        let instruction = self.parse_instruction()?;
+
+        if let Some(instruction) = instruction {
+            self.program.push(Item::Instruction(instruction));
+        }
 
         self.skip_to_eol();
 
-        if let None = label {
-            Ok(None)
-        } else {
-            Ok(Some(Line {
-                label,
-                action: None,
-            }))
-        }
+        Ok(())
     }
 
     /// Parses an optional label at the beginning of a line.
@@ -382,7 +271,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                 name: identifier,
                 span: period_span.start..span.end,
             })
-            // TODO keeping this for reference later when the next stage deals with this.
+            // TODO keeping this for reference later when the generation stage deals with this.
             // // Check that there is actually a top-level label to add this to.
             // self.labels
             //     .last_mut()
@@ -413,52 +302,86 @@ impl<'source, 'context> ParserContext<'source, 'context> {
         }))
     }
 
-    fn parse_action(&mut self) -> Result<Option<Action>, AssemblerError> {
+    fn parse_instruction(&mut self) -> Result<Option<Instruction>, AssemblerError> {
         let parsed_mnemonic = self.parse_mnemonic();
-        let parsed_operand = self.parse_operand();
+        // If mnemonic is implied then don't try to parse what follows
+        // an operand, return and let parse_line skip it as a comment.
+        if let Some(ref mnemonic) = parsed_mnemonic {
+            if mnemonic.0.is_implied() {
+                return Ok(Some(Instruction {
+                    mnemonic: Spanned::new(mnemonic.clone()),
+                    operand: None,
+                }));
+            }
+        }
+        let parsed_operand = self.parse_operand()?;
 
-        // handle include directive specially because it's handled by the parser, not the assembler stage.
-        if let Some((mnemonic, mnemonic_span)) = parsed_mnemonic {
+        // Handle the include directive here so the nested parser can give its Items to the generation stage.
+        // Other directives will be handled in that stage.
+        if let Some((ref mnemonic, ref mnemonic_span)) = parsed_mnemonic {
             if let Mnemonic::Inl = mnemonic {
-                if let Ok(Some((Operand::Literal(Literal::String(to_include)), to_include_span))) =
+                if let Some((Operand::Literal(Literal::String(to_include_name)), to_include_span)) =
                     parsed_operand
                 {
-                    let parse_result =
-                        self.handle_include(to_include, mnemonic_span.start..to_include_span.end);
-                    // TODO put result into context
-                    // let included__id = if self.id_table.contains_key(&self.file_name) {
-                    //     self.id_table[&self.file_name]
-                    // } else {
-                    //     self.files.add(self.file_name.clone(), source)
-                    // };
-                    // // Push included file's ID before its code so the next stage knows what file it's in.
-                    // if let Some(id) = included_id {
-                    //     program.lines.push(OldLine::PushInclude(id));
-                    // }
-                    // match parse_result {
-                    //     Ok(mut included_program) => {
-                    //         program.lines.append(&mut included_program.lines)
-                    //     }
-                    //     Err(mut included_errors) => errors.append(&mut included_errors),
-                    // }
-                    // // And the next stage needs to know when the included file ends.
-                    // if included_id.is_some() {
-                    //     program.lines.push(OldLine::PopInclude);
-                    // }
-                    // skip_to_eol(&mut lexer);
-                    // continue;
+                    // Expect the included file extension to be 65a.
+                    return match Path::new(&to_include_name).extension() {
+                        Some(extension) if extension == "65a" => {
+                            let (included_id, parse_result) = self.handle_include(
+                                to_include_name,
+                                mnemonic_span.start..to_include_span.end,
+                            );
+                            // Push included file's ID before its code so the generation stage knows what file it's in.
+                            if let Some(id) = included_id {
+                                self.program.push(Item::PushInclude(id));
+                            }
+                            match parse_result {
+                                Ok(mut included_program) => {
+                                    self.program.append(&mut included_program)
+                                }
+                                Err(mut included_errors) => {
+                                    self.errors.append(&mut included_errors)
+                                }
+                            }
+                            // And the generation stage needs to know when the included file ends.
+                            if included_id.is_some() {
+                                self.program.push(Item::PopInclude);
+                            }
+                            Ok(None)
+                        }
+                        // Wrong or no extension, error.
+                        _ => Err(AssemblerError {
+                            message: format!("Could not include {}", to_include_name),
+                            labels: vec![(
+                                Location {
+                                    span: to_include_span,
+                                    name: self.file_name.clone(),
+                                },
+                                Some("File extension is expected to be `65a`".to_string()),
+                            )],
+                            help: None,
+                        }),
+                    };
                 }
             }
         }
 
-        Ok(None)
+        // If we parsed a mnemonic then create an Instruction
+        // with optional operand, otherwise None.
+        if let Some(mnemonic) = parsed_mnemonic {
+            Ok(Some(Instruction {
+                mnemonic: Spanned::new(mnemonic),
+                operand: parsed_operand.map(Spanned::new),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_mnemonic(&mut self) -> Option<(Mnemonic, Range<usize>)> {
-        let mnemonic_result = match self.lexer.peek() {
-            None => return None,
-            Some((token, _)) => Mnemonic::try_from(token),
-        };
+        let mnemonic_result = self
+            .lexer
+            .peek()
+            .map(|(token, _)| Mnemonic::try_from(token))?;
 
         let mnemonic = match mnemonic_result {
             Ok(mnemonic) => mnemonic,
@@ -487,23 +410,6 @@ impl<'source, 'context> ParserContext<'source, 'context> {
         }
     }
 }
-
-// fn parse_directive(lexer: &mut SpannedLexer) -> Result<Option<Directive>, AssemblerError> {
-//     let (mut token, mut span) = match lexer.next_if(|(token, _)| {
-//         matches!(token, Token::Dfb)
-//             || matches!(token, Token::Dfw)
-//             || matches!(token, Token::Equ)
-//             || matches!(token, Token::Inl)
-//             || matches!(token, Token::Hlt)
-//             || matches!(token, Token::Org)
-//             || matches!(token, Token::Sct)
-//     }) {
-//         Some(next) => next,
-//         None => return Ok(None),
-//     };
-
-//     Ok(None)
-// }
 
 impl TryFrom<&Token> for Mnemonic {
     type Error = ();

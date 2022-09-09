@@ -1,13 +1,8 @@
 use std::collections::HashMap;
 
 use codespan_reporting::files::SimpleFiles;
-use logos::Logos;
 
-use crate::{
-    ast::{Include, Location},
-    lexer::Token,
-    parser::ParserContext,
-};
+use crate::{ast::*, parser::ParserContext};
 
 #[test]
 fn empty_line() {
@@ -22,11 +17,10 @@ fn empty_line() {
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
-    let lexer = Token::lexer(&source).spanned().peekable();
 
     let mut parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source,
         &mut files,
         &mut include_stack,
         &mut id_table,
@@ -34,7 +28,7 @@ fn empty_line() {
 
     let line = parser_context.parse_line();
     assert!(line.is_ok());
-    assert!(line.unwrap().is_none());
+    assert!(parser_context.program.is_empty());
 }
 
 #[test]
@@ -50,11 +44,10 @@ fn label_line() {
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
-    let lexer = Token::lexer(&source).spanned().peekable();
 
     let mut parser_context = ParserContext::new(
         source_name.clone(),
-        lexer,
+        &source,
         &mut files,
         &mut include_stack,
         &mut id_table,
@@ -62,5 +55,13 @@ fn label_line() {
 
     let line = parser_context.parse_line();
     assert!(line.is_ok());
-    assert!(line.unwrap().unwrap().label.is_some());
+    assert_eq!(
+        parser_context.program,
+        vec![Item::Label(Label::Top(TopLabel {
+            name: "mylabel".to_string(),
+            span: 0..7,
+            visibility: Visibility::Object,
+            sublabels: vec![],
+        }))]
+    );
 }

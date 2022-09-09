@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate indoc;
 
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, path::Path};
 
 use ast::{Include, Location};
 use clap::{arg, command};
@@ -14,12 +14,9 @@ use codespan_reporting::{
         Config,
     },
 };
-use lexer::Token;
-use logos::Logos;
 
 mod ast;
 mod error;
-mod lexer;
 mod parser;
 
 fn main() {
@@ -68,7 +65,12 @@ fn main() {
         .values_of("SOURCES")
         .unwrap()
         .map(|name| name.to_string())
-        .partition(|name| name.ends_with(".65a"));
+        .partition(|name| {
+            Path::new(name)
+                .extension()
+                .filter(|&extension| extension == "65a")
+                .is_some()
+        });
 
     // This takes file IDs and spans to fetch excerpts from source code in error reporting.
     let mut files = SimpleFiles::<String, String>::new();
@@ -86,6 +88,7 @@ fn main() {
         );
     }
 
+    // TODO spawn a thread that does all of this for parallel compilation, deal with mutex to terminal
     for file_name in source_names {
         // Skip the sources that couldn't be read because they're separate compilation units.
         let source = fs::read_to_string(&file_name);
@@ -108,7 +111,8 @@ fn main() {
 
         // Stack of included files used to prevent recursion.
         // Start with an entry including the top level file and say the command line
-        // included it in case another file tries to include it.
+        // included it. If a file tries to include it then it will get <command line>
+        // when finding out who already included it.
         let mut include_stack = vec![Include {
             included: file_name.clone(),
             loc: Location {
@@ -119,18 +123,17 @@ fn main() {
 
         // Table associating file names with their file IDs.
         let mut id_table = HashMap::<String, usize>::new();
-        // A lexer of the source for the parser to use.
-        let mut lexer = Token::lexer(&source).spanned().peekable();
 
         let parser_context = parser::ParserContext::new(
             file_name.clone(),
-            lexer,
+            &source,
             &mut files,
             &mut include_stack,
             &mut id_table,
         );
 
         let program_result = parser_context.parse_program();
+        // Don't put a duplicate source in the files.
         let file_id = if id_table.contains_key(&file_name) {
             id_table[&file_name]
         } else {
