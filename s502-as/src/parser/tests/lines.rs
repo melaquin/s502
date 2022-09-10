@@ -28,7 +28,7 @@ fn empty_line() {
 
     let line = parser_context.parse_line();
     assert!(line.is_ok());
-    assert!(parser_context.program.is_empty());
+    assert_eq!(parser_context.program, vec![Action::LineEnd(0)]);
 }
 
 #[test]
@@ -57,13 +57,16 @@ fn label_line() {
     assert!(line.is_ok());
     assert_eq!(
         parser_context.program,
-        vec![Action::Label(Spanned::new((
-            Label::Top(TopLabel {
-                name: "mylabel".to_string(),
-                visibility: Visibility::Object,
-                sublabels: vec![],
-            }),
-            0..7
-        )))]
+        vec![
+            Action::Label(Spanned::new((
+                Label::Top(TopLabel {
+                    name: "mylabel".to_string(),
+                    visibility: Visibility::Object,
+                    sublabels: vec![],
+                }),
+                0..7
+            ))),
+            Action::LineEnd(7)
+        ]
     );
 }

@@ -46,7 +46,6 @@ impl<'source, 'context> ParserContext<'source, 'context> {
     pub fn parse_program(mut self) -> Result<Program, Vec<AssemblerError>> {
         while self.lexer.peek().is_some() {
             // Tell the generation stage where this line starts.
-            // The LineEnd will be pushed in parse_line.
             self.program
                 .push(Action::LineStart(self.lexer.peek().unwrap().1.start));
 
@@ -61,138 +60,6 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             Err(self.errors)
         } else {
             Ok(self.program)
-        }
-    }
-
-    /// Read and parse an included file, preventing circular inclusion.
-    /// Returns the included file ID (if reading was successful) and
-    /// the result of parsing the included file.
-    fn handle_include(
-        &mut self,
-        to_include_name: String,
-        to_include_span: Range<usize>,
-    ) -> (Option<usize>, Result<Program, Vec<AssemblerError>>) {
-        // Check if the file has already been parsed. If it has then it would loop back
-        // to this file and cause infinite recursion.
-        if let Some(include) = self
-            .include_stack
-            .iter()
-            .find(|include| include.included == to_include_name)
-        {
-            return (
-                None,
-                Err(vec![AssemblerError {
-                    message: "Recursive include found".to_string(),
-                    labels: vec![
-                        (
-                            Location {
-                                span: to_include_span,
-                                // SAFETY Last can be unwrapped because the stack has at least one member
-                                // before parse_program and subsequently handle_include are called.
-                                name: self.include_stack.last().unwrap().included.clone(),
-                            },
-                            Some(format!("Could not include {}", to_include_name)),
-                        ),
-                        (
-                            Location {
-                                span: include.loc.span.clone(),
-                                name: include.loc.name.clone(),
-                            },
-                            Some(if include == self.include_stack.first().unwrap() {
-                                "Given in assembler invocatiion".to_string()
-                            } else {
-                                "Already included here".to_string()
-                            }),
-                        ),
-                    ],
-
-                    help: Some(formatdoc!(
-                        "Labels can be referenced before they're defined,
-                         so including `{}` here may not be necessary",
-                        to_include_name
-                    )),
-                }]),
-            );
-        }
-
-        // No recursion, read the source.
-        let included_source = match fs::read_to_string(&to_include_name) {
-            Err(error) => {
-                return (
-                    None,
-                    Err(vec![AssemblerError {
-                        message: format!("Could not read {}: {}", to_include_name, error),
-                        labels: vec![(
-                            Location {
-                                span: to_include_span,
-                                name: self.include_stack.last().unwrap().included.clone(),
-                            },
-                            None,
-                        )],
-                        help: None,
-                    }]),
-                );
-            }
-            Ok(source) => source,
-        };
-
-        // Add it to the stack so it can be found in nested calls to handle_include.
-        self.include_stack.push(Include {
-            included: to_include_name.clone(),
-            loc: Location {
-                span: to_include_span.start..to_include_span.end,
-                name: self.include_stack.last().unwrap().included.clone(),
-            },
-        });
-
-        let included_context = ParserContext::new(
-            to_include_name.clone(),
-            &included_source,
-            self.files,
-            self.include_stack,
-            self.id_table,
-        );
-
-        let parse_result = included_context.parse_program();
-        let included_file_id = if self.id_table.contains_key(&self.file_name) {
-            self.id_table[&to_include_name]
-        } else {
-            self.files.add(to_include_name.clone(), included_source)
-        };
-
-        // Remove it from the stack so it may be included again later.
-        let _ = self.include_stack.pop();
-        // And add it to the map if it hasn't been included before.
-        if !self.id_table.contains_key(&to_include_name) {
-            self.id_table.insert(to_include_name, included_file_id);
-        }
-        (Some(included_file_id), parse_result)
-    }
-
-    /// Skip past the end of the line after it is done being parsed.
-    /// This makes a dedicated line comment character unnecessary
-    /// just like the good ol' days. Returns the index of the end of
-    /// the line so the newline can be included in the listing,
-    /// or 0 if no token swere skipped.
-    fn skip_to_eol(&mut self) -> usize {
-        // Use this in case the file ends without a newline.
-        // If it returns 0 then there was nothing to skip and
-        // the lexer was already at the end of the file.
-        let mut last_end = 0;
-        loop {
-            match self.lexer.peek() {
-                // No token to get the end of, so return
-                // the end of the previous token.
-                None => return last_end,
-                Some((Token::Eol, _)) => {
-                    // Include the newline because it wil be printed
-                    // at the end of each line of the listing.
-                    return self.lexer.next().unwrap().1.end;
-                }
-                _ => {
-                    last_end = self.lexer.next().unwrap().1.end;
-                }
-            }
         }
     }
 
@@ -449,6 +316,138 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             Ok(Some((Operand::Literal(literal), span)))
         } else {
             Ok(None)
+        }
+    }
+
+    /// Read and parse an included file, preventing circular inclusion.
+    /// Returns the included file ID (if reading was successful) and
+    /// the result of parsing the included file.
+    fn handle_include(
+        &mut self,
+        to_include_name: String,
+        to_include_span: Range<usize>,
+    ) -> (Option<usize>, Result<Program, Vec<AssemblerError>>) {
+        // Check if the file has already been parsed. If it has then it would loop back
+        // to this file and cause infinite recursion.
+        if let Some(include) = self
+            .include_stack
+            .iter()
+            .find(|include| include.included == to_include_name)
+        {
+            return (
+                None,
+                Err(vec![AssemblerError {
+                    message: "Recursive include found".to_string(),
+                    labels: vec![
+                        (
+                            Location {
+                                span: to_include_span,
+                                // SAFETY Last can be unwrapped because the stack has at least one member
+                                // before parse_program and subsequently handle_include are called.
+                                name: self.include_stack.last().unwrap().included.clone(),
+                            },
+                            Some(format!("Could not include {}", to_include_name)),
+                        ),
+                        (
+                            Location {
+                                span: include.loc.span.clone(),
+                                name: include.loc.name.clone(),
+                            },
+                            Some(if include == self.include_stack.first().unwrap() {
+                                "Given in assembler invocatiion".to_string()
+                            } else {
+                                "Already included here".to_string()
+                            }),
+                        ),
+                    ],
+
+                    help: Some(formatdoc!(
+                        "Labels can be referenced before they're defined,
+                         so including `{}` here may not be necessary",
+                        to_include_name
+                    )),
+                }]),
+            );
+        }
+
+        // No recursion, read the source.
+        let included_source = match fs::read_to_string(&to_include_name) {
+            Err(error) => {
+                return (
+                    None,
+                    Err(vec![AssemblerError {
+                        message: format!("Could not read {}: {}", to_include_name, error),
+                        labels: vec![(
+                            Location {
+                                span: to_include_span,
+                                name: self.include_stack.last().unwrap().included.clone(),
+                            },
+                            None,
+                        )],
+                        help: None,
+                    }]),
+                );
+            }
+            Ok(source) => source,
+        };
+
+        // Add it to the stack so it can be found in nested calls to handle_include.
+        self.include_stack.push(Include {
+            included: to_include_name.clone(),
+            loc: Location {
+                span: to_include_span.start..to_include_span.end,
+                name: self.include_stack.last().unwrap().included.clone(),
+            },
+        });
+
+        let included_context = ParserContext::new(
+            to_include_name.clone(),
+            &included_source,
+            self.files,
+            self.include_stack,
+            self.id_table,
+        );
+
+        let parse_result = included_context.parse_program();
+        let included_file_id = if self.id_table.contains_key(&self.file_name) {
+            self.id_table[&to_include_name]
+        } else {
+            self.files.add(to_include_name.clone(), included_source)
+        };
+
+        // Remove it from the stack so it may be included again later.
+        let _ = self.include_stack.pop();
+        // And add it to the map if it hasn't been included before.
+        if !self.id_table.contains_key(&to_include_name) {
+            self.id_table.insert(to_include_name, included_file_id);
+        }
+        (Some(included_file_id), parse_result)
+    }
+
+    /// Skip past the end of the line after it is done being parsed.
+    /// This makes a dedicated line comment character unnecessary
+    /// just like the good ol' days. Returns the index of the end of
+    /// the line so the newline can be included in the listing,
+    /// or 0 if no token swere skipped.
+    fn skip_to_eol(&mut self) -> usize {
+        // Use this in case the file ends without a newline.
+        // If it returns 0 then there was nothing to skip and
+        // the lexer was already at the end of the file.
+        let mut last_end = 0;
+        loop {
+            match self.lexer.peek() {
+                // No token to get the end of, so return
+                // the end of the previous token.
+                None => return last_end,
+                Some((Token::Eol, _)) => {
+                    // Include the newline because it wil be printed
+                    // at the end of each line of the listing.
+                    return self.lexer.next().unwrap().1.end;
+                }
+                _ => {
+                    last_end = self.lexer.next().unwrap().1.end;
+                }
+            }
         }
     }
 }
