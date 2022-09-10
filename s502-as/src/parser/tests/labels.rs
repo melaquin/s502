@@ -29,10 +29,9 @@ fn plain() {
     assert!(label.is_ok());
 
     assert_eq!(
-        label.unwrap().unwrap(),
+        label.unwrap().unwrap().val,
         Label::Top(TopLabel {
             name: "mylabel".to_string(),
-            span: 0..7,
             visibility: Visibility::Object,
             sublabels: vec![],
         })
@@ -65,10 +64,9 @@ fn global() {
     assert!(label.is_ok());
 
     assert_eq!(
-        label.unwrap().unwrap(),
+        label.unwrap().unwrap().val,
         Label::Top(TopLabel {
             name: "yourlabel".to_string(),
-            span: 1..10,
             visibility: Visibility::Global,
             sublabels: vec![],
         })
@@ -101,11 +99,8 @@ fn sublabel() {
     assert!(sublabel.is_ok());
 
     assert_eq!(
-        sublabel.unwrap().unwrap(),
-        Label::Sub(SubLabel {
-            name: "sublabel".to_string(),
-            span: 0..9,
-        })
+        sublabel.unwrap().unwrap().val,
+        Label::Sub("sublabel".to_string())
     );
 }
 

@@ -45,6 +45,11 @@ impl<'source, 'context> ParserContext<'source, 'context> {
 
     pub fn parse_program(mut self) -> Result<Program, Vec<AssemblerError>> {
         while self.lexer.peek().is_some() {
+            // Tell the generation stage where this line starts.
+            // The LineEnd will be pushed in parse_line.
+            self.program
+                .push(Action::LineStart(self.lexer.peek().unwrap().1.start));
+
             match self.parse_line() {
                 // The line was empty, go on to the next one.
                 Ok(()) => continue,
@@ -100,8 +105,13 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                             }),
                         ),
                     ],
-                    help: Some(format!("Labels can be referenced before they're defined,\nso including `{}` here may not be necessary", to_include_name)),
-                }])
+
+                    help: Some(formatdoc!(
+                        "Labels can be referenced before they're defined,
+                         so including `{}` here may not be necessary",
+                        to_include_name
+                    )),
+                }]),
             );
         }
 
@@ -161,17 +171,26 @@ impl<'source, 'context> ParserContext<'source, 'context> {
 
     /// Skip past the end of the line after it is done being parsed.
     /// This makes a dedicated line comment character unnecessary
-    /// just like the good ol' days.
-    fn skip_to_eol(&mut self) {
+    /// just like the good ol' days. Returns the index of the end of
+    /// the line so the newline can be included in the listing,
+    /// or 0 if no token swere skipped.
+    fn skip_to_eol(&mut self) -> usize {
+        // Use this in case the file ends without a newline.
+        // If it returns 0 then there was nothing to skip and
+        // the lexer was already at the end of the file.
+        let mut last_end = 0;
         loop {
             match self.lexer.peek() {
-                None => break,
+                // No token to get the end of, so return
+                // the end of the previous token.
+                None => return last_end,
                 Some((Token::Eol, _)) => {
-                    self.lexer.next();
-                    break;
+                    // Include the newline because it wil be printed
+                    // at the end of each line of the listing.
+                    return self.lexer.next().unwrap().1.end;
                 }
                 _ => {
-                    self.lexer.next();
+                    last_end = self.lexer.next().unwrap().1.end;
                 }
             }
         }
@@ -179,28 +198,42 @@ impl<'source, 'context> ParserContext<'source, 'context> {
 
     /// Parse a line including the label, mnemonic, and operand.
     fn parse_line(&mut self) -> Result<(), AssemblerError> {
+        // Initialize to 0 to satisfy the compiler even though
+        // parse_line is only called when lexer.peek() is Some.
+        let mut line_end = 0;
         // Label appears first.
         let label = self.parse_label()?;
-        // Add it to the program right away because if the action is an include, then
+        // Add it to the program right away because if the instruction is an include, then
         // parse_instruction will put the included file in the program before returning.
         if let Some(label) = label {
-            self.program.push(Item::Label(label));
+            // So far this is where the line ends.
+            line_end = label.span.end;
+            self.program.push(Action::Label(label));
         }
 
         let instruction = self.parse_instruction()?;
 
         if let Some(instruction) = instruction {
-            self.program.push(Item::Instruction(instruction));
+            // It actualy ends here.
+            line_end = instruction.span.end;
+            self.program.push(Action::Instruction(instruction));
         }
 
-        self.skip_to_eol();
+        let eol_end = self.skip_to_eol();
+
+        // Or, if there was a comment, then it actually ends there.
+        self.program.push(Action::LineEnd(if eol_end != 0 {
+            eol_end
+        } else {
+            line_end
+        }));
 
         Ok(())
     }
 
     /// Parses an optional label at the beginning of a line.
     /// Matches the syntax (GLOBAL | PERIOD)? ID.
-    fn parse_label(&mut self) -> Result<Option<Label>, AssemblerError> {
+    fn parse_label(&mut self) -> Result<Option<Spanned<Label>>, AssemblerError> {
         // Only want to parse a label if we see one of these four tokens, otherwise
         // there is no label to parse.
         let (mut token, mut span) = match self.lexer.next_if(|(token, _)| {
@@ -212,8 +245,8 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             None => return Ok(None),
         };
 
-        // A label  may start with either `!`, indicating that  the label should be exported,
-        // or `.` indicating that it is a sublabel of the most recent top-level label.
+        // A label  may start with either `!`, indicating that it should be exported,
+        // or `.`, indicating that it is a sublabel of the most recent top-level label.
         let (vis, sublabel) = match token {
             Token::Global => {
                 let attributes = (Some(span.clone()), None);
@@ -267,10 +300,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
         };
 
         Ok(Some(if let Some(period_span) = sublabel {
-            Label::Sub(SubLabel {
-                name: identifier,
-                span: period_span.start..span.end,
-            })
+            Spanned::new((Label::Sub(identifier), period_span.start..span.end))
             // TODO keeping this for reference later when the generation stage deals with this.
             // // Check that there is actually a top-level label to add this to.
             // self.labels
@@ -289,29 +319,34 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             //         span: period_span.start..span.end,
             //     });
         } else {
-            Label::Top(TopLabel {
-                name: identifier,
+            Spanned::new((
+                Label::Top(TopLabel {
+                    name: identifier,
+                    visibility: if vis.is_some() {
+                        Visibility::Global
+                    } else {
+                        Visibility::Object
+                    },
+                    sublabels: vec![],
+                }),
                 span,
-                visibility: if vis.is_some() {
-                    Visibility::Global
-                } else {
-                    Visibility::Object
-                },
-                sublabels: vec![],
-            })
+            ))
         }))
     }
 
-    fn parse_instruction(&mut self) -> Result<Option<Instruction>, AssemblerError> {
+    fn parse_instruction(&mut self) -> Result<Option<Spanned<Instruction>>, AssemblerError> {
         let parsed_mnemonic = self.parse_mnemonic();
         // If mnemonic is implied then don't try to parse what follows
         // an operand, return and let parse_line skip it as a comment.
         if let Some(ref mnemonic) = parsed_mnemonic {
             if mnemonic.0.is_implied() {
-                return Ok(Some(Instruction {
-                    mnemonic: Spanned::new(mnemonic.clone()),
-                    operand: None,
-                }));
+                return Ok(Some(Spanned::new((
+                    Instruction {
+                        mnemonic: Spanned::new(mnemonic.clone()),
+                        operand: None,
+                    },
+                    mnemonic.1.clone(),
+                ))));
             }
         }
         let parsed_operand = self.parse_operand()?;
@@ -332,7 +367,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                             );
                             // Push included file's ID before its code so the generation stage knows what file it's in.
                             if let Some(id) = included_id {
-                                self.program.push(Item::PushInclude(id));
+                                self.program.push(Action::PushInclude(id));
                             }
                             match parse_result {
                                 Ok(mut included_program) => {
@@ -344,7 +379,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                             }
                             // And the generation stage needs to know when the included file ends.
                             if included_id.is_some() {
-                                self.program.push(Item::PopInclude);
+                                self.program.push(Action::PopInclude);
                             }
                             Ok(None)
                         }
@@ -368,10 +403,17 @@ impl<'source, 'context> ParserContext<'source, 'context> {
         // If we parsed a mnemonic then create an Instruction
         // with optional operand, otherwise None.
         if let Some(mnemonic) = parsed_mnemonic {
-            Ok(Some(Instruction {
-                mnemonic: Spanned::new(mnemonic),
-                operand: parsed_operand.map(Spanned::new),
-            }))
+            let instruction_span = mnemonic.1.start
+                ..parsed_operand
+                    .as_ref()
+                    .map_or(mnemonic.1.end, |operand| operand.1.end);
+            Ok(Some(Spanned::new((
+                Instruction {
+                    mnemonic: Spanned::new(mnemonic),
+                    operand: parsed_operand.map(Spanned::new),
+                },
+                instruction_span,
+            ))))
         } else {
             Ok(None)
         }

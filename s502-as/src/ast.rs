@@ -65,15 +65,22 @@ pub struct Include {
 }
 
 /// Representation of an assembly file.
-pub type Program = Vec<Item>;
+pub type Program = Vec<Action>;
 
+/// Something for the code generator to do.
 #[derive(Debug, PartialEq)]
-pub enum Item {
+pub enum Action {
+    /// The index into the source where a line starts.
+    /// This is used in combination with LineEnd to
+    /// get the source code for generating listings.
+    LineStart(usize),
+    /// The index into the source where a line ends.
+    LineEnd(usize),
     /// Tell the assembler stage to mark
     /// the current address with a label.
-    Label(Label),
+    Label(Spanned<Label>),
     /// Either a directive or instruction.
-    Instruction(Instruction),
+    Instruction(Spanned<Instruction>),
     /// The parser read in an included file with the
     /// given ID, and the following Items belong to it.
     PushInclude(usize),
@@ -85,16 +92,15 @@ pub enum Item {
 #[derive(Debug, PartialEq)]
 pub enum Label {
     Top(TopLabel),
-    Sub(SubLabel),
+    Sub(String),
 }
 
 /// Top level label of the line.
 #[derive(Debug, PartialEq)]
 pub struct TopLabel {
     pub name: String,
-    pub span: Range<usize>,
     pub visibility: Visibility,
-    pub sublabels: Vec<SubLabel>,
+    pub sublabels: Vec<String>,
 }
 
 /// A toplevel label can be exposed to other objects or kept
@@ -103,13 +109,6 @@ pub struct TopLabel {
 pub enum Visibility {
     Global,
     Object,
-}
-
-/// A sublabel is only visible within the toplevel label it is under.
-#[derive(Debug, PartialEq)]
-pub struct SubLabel {
-    pub name: String,
-    pub span: Range<usize>,
 }
 
 /// A directive or CPU instruction.

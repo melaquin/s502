@@ -57,11 +57,13 @@ fn label_line() {
     assert!(line.is_ok());
     assert_eq!(
         parser_context.program,
-        vec![Item::Label(Label::Top(TopLabel {
-            name: "mylabel".to_string(),
-            span: 0..7,
-            visibility: Visibility::Object,
-            sublabels: vec![],
-        }))]
+        vec![Action::Label(Spanned::new((
+            Label::Top(TopLabel {
+                name: "mylabel".to_string(),
+                visibility: Visibility::Object,
+                sublabels: vec![],
+            }),
+            0..7
+        )))]
     );
 }
