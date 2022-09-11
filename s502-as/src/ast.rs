@@ -1,10 +1,5 @@
 use std::ops::Range;
 
-// TODO rename lexer's literal to immediate,
-// make new Literal as an AST node,
-// then make lexer a private mod
-use crate::parser::lexer::Literal;
-
 /// An AST node with associated span in the source file.
 /// This does not contain a Location because this will
 /// be used by the generation stage which will get the
@@ -52,7 +47,7 @@ pub struct Location {
     pub span: Range<usize>,
     /// Which file. This is used as a map key
     /// to find the corresponding file ID.
-    pub name: String,
+    pub file_name: String,
 }
 
 /// A file inclusion encountered while parsing.
@@ -123,25 +118,166 @@ pub struct Instruction {
 /// An assembler or CPU instruction to execute.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mnemonic {
+    Adc,
+    And,
+    Asl,
+    Bcc,
+    Bcs,
+    Beq,
+    Bit,
+    Bmi,
+    Bne,
+    Bpl,
+    Brk,
+    Bvc,
+    Bvs,
+    Clc,
+    Cld,
+    Cli,
+    Clv,
+    Cmp,
+    Cpx,
+    Cpy,
+    Dec,
+    Dex,
+    Dey,
+    Eor,
+    Inc,
+    Inx,
+    Iny,
+    Jmp,
+    Jsr,
+    Lda,
+    Ldx,
+    Ldy,
+    Lsr,
+    Nop,
+    Ora,
+    Pha,
+    Php,
+    Pla,
+    Plp,
+    Rol,
+    Ror,
+    Rti,
+    Rts,
+    Sbc,
+    Sec,
+    Sed,
+    Sei,
+    Sta,
+    Stx,
+    Sty,
+    Tax,
+    Tay,
+    Tsx,
+    Txa,
+    Txs,
+    Tya,
     Dfb,
     Dfw,
     Equ,
-    Inl,
     Hlt,
+    Inl,
     Org,
     Sct,
 }
 
 impl Mnemonic {
     pub fn is_implied(&self) -> bool {
-        self == &Mnemonic::Hlt
+        self == &Mnemonic::Brk
+            || self == &Mnemonic::Clc
+            || self == &Mnemonic::Cld
+            || self == &Mnemonic::Cli
+            || self == &Mnemonic::Clv
+            || self == &Mnemonic::Dex
+            || self == &Mnemonic::Dey
+            || self == &Mnemonic::Inx
+            || self == &Mnemonic::Iny
+            || self == &Mnemonic::Nop
+            || self == &Mnemonic::Pha
+            || self == &Mnemonic::Php
+            || self == &Mnemonic::Pla
+            || self == &Mnemonic::Plp
+            || self == &Mnemonic::Rti
+            || self == &Mnemonic::Rts
+            || self == &Mnemonic::Sec
+            || self == &Mnemonic::Sed
+            || self == &Mnemonic::Sei
+            || self == &Mnemonic::Tax
+            || self == &Mnemonic::Tay
+            || self == &Mnemonic::Tsx
+            || self == &Mnemonic::Txa
+            || self == &Mnemonic::Txs
+            || self == &Mnemonic::Tya
     }
 }
 
 /// The parsed instruction operand.
 #[derive(Debug, PartialEq)]
-pub enum Operand {
-    Literal(Literal),
-    // TODO don't make lexer create a Literal
-    // because the parser should also create a Reference literal
+pub struct Operand {
+    pub mode: OperandMode,
+    pub modifier: Option<Spanned<Modifier>>,
+    pub value: Spanned<Value>,
+}
+
+/// An appproximation of the operand's address mode.
+/// The exact mode cannot be parsed because references
+/// may be to bytes or words which makes the operand
+/// ambiguous.
+#[derive(Debug, PartialEq)]
+pub enum OperandMode {
+    /// The A register is being used.
+    Accumulator,
+    /// Some address is being used. This covers
+    /// absolute, zeropage, and relative, but which
+    /// one it is is not known until generation
+    /// when macros and labels are resolved.
+    Address,
+    /// X is added to an address. This covers
+    /// abs,x and zpg,x, but which
+    /// one it is is not known until generation
+    /// when macros and labels are resolved.
+    XIndexed,
+    /// Y is added to an address. This covers
+    /// abs,y and zpg,y, but which
+    /// one it is is not known until generation
+    /// when macros and labels are resolved.
+    YIndexed,
+    /// The operand is an immediate number.
+    Immediate,
+    /// The operand dereferences an absolute address.
+    Indirect,
+    /// The operand adds X to a zeropage address
+    /// without carry and dereferences the word
+    /// at that address.
+    XIndirect,
+    /// The operand dereferences the word at the
+    /// zeropage address and adds Y to it with carry.
+    IndirectY,
+}
+
+/// A modifier to a word value.
+#[derive(Debug, PartialEq)]
+pub enum Modifier {
+    /// Take the high byte of that word.
+    HighByte,
+    /// Take the low byte of that word.
+    LowByte,
+}
+
+/// The value to be modified and used by the operand.
+#[derive(Debug, PartialEq)]
+pub enum Value {
+    /// The accumulator is the value to be used.
+    /// This is only used with the Accumulator address mode.
+    Accumulator,
+    /// The value is a literal byte.
+    Byte(u8),
+    /// The value is a literal word.
+    Word(u16),
+    /// The value is a literal strig.
+    String(String),
+    /// The value is a reference to a macro or label.
+    Reference(String),
 }

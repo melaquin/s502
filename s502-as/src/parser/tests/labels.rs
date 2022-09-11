@@ -12,7 +12,7 @@ fn plain() {
         included: source_name.clone(),
         loc: Location {
             span: 0..1,
-            name: "<test harness>".to_string(),
+            file_name: "<test harness>".to_string(),
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
@@ -47,7 +47,7 @@ fn global() {
         included: source_name.clone(),
         loc: Location {
             span: 0..1,
-            name: "<test harness>".to_string(),
+            file_name: "<test harness>".to_string(),
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
@@ -82,7 +82,7 @@ fn sublabel() {
         included: source_name.clone(),
         loc: Location {
             span: 0..1,
-            name: "<test harness>".to_string(),
+            file_name: "<test harness>".to_string(),
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
@@ -113,7 +113,7 @@ fn no_ident_after_global() {
         included: source_name.clone(),
         loc: Location {
             span: 0..1,
-            name: "<test harness>".to_string(),
+            file_name: "<test harness>".to_string(),
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
@@ -136,7 +136,7 @@ fn no_ident_after_global() {
             labels: vec![(
                 Location {
                     span: 1..4,
-                    name: "no ident after global test".to_string()
+                    file_name: "no ident after global test".to_string()
                 },
                 Some("Expected a label".to_string())
             )],
@@ -154,7 +154,7 @@ fn no_ident_after_period() {
         included: source_name.clone(),
         loc: Location {
             span: 0..1,
-            name: "<test harness>".to_string(),
+            file_name: "<test harness>".to_string(),
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
@@ -177,7 +177,7 @@ fn no_ident_after_period() {
             labels: vec![(
                 Location {
                     span: 1..4,
-                    name: "no ident after period test".to_string()
+                    file_name: "no ident after period test".to_string()
                 },
                 Some("Expected a label".to_string())
             )],

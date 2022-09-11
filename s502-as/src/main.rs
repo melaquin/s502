@@ -117,7 +117,7 @@ fn main() {
             included: file_name.clone(),
             loc: Location {
                 span: 0..1,
-                name: "<command line>".to_string(),
+                file_name: "<command line>".to_string(),
             },
         }];
 
@@ -156,7 +156,7 @@ fn main() {
 
                     // The first will be primary.
                     if let Some((loc, message)) = notes.next() {
-                        let mut label = Label::primary(id_table[&loc.name], loc.span);
+                        let mut label = Label::primary(id_table[&loc.file_name], loc.span);
                         if let Some(message) = message {
                             label = label.with_message(message);
                         }
@@ -165,7 +165,7 @@ fn main() {
 
                     // And the rest secondary.
                     notes.for_each(|(loc, message)| {
-                        let mut label = Label::secondary(id_table[&loc.name], loc.span);
+                        let mut label = Label::secondary(id_table[&loc.file_name], loc.span);
                         if let Some(message) = message {
                             label = label.with_message(message);
                         }

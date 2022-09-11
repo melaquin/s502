@@ -210,6 +210,18 @@ pub enum Token {
     Global,
     #[token(".")]
     Period,
+    #[token(",")]
+    Comma,
+    #[token("#")]
+    Immediate,
+    #[token("(")]
+    LParen,
+    #[token(")")]
+    RParen,
+    #[token("<")]
+    LAngle,
+    #[token(">")]
+    RAngle,
     #[regex("\\$[0-9a-fA-F]+", lex_number)]
     #[regex("%[0-1]+", lex_number)]
     #[regex("@[0-7]+", lex_number)]
@@ -297,6 +309,12 @@ impl fmt::Display for Token {
             Self::Y => write!(f, "`Y`"),
             Self::Global => write!(f, "`!`"),
             Self::Period => write!(f, "`.`"),
+            Self::Comma => write!(f, "`,`"),
+            Self::Immediate => write!(f, "`#`"),
+            Self::LParen => write!(f, "`(`"),
+            Self::RParen => write!(f, "`)`"),
+            Self::LAngle => write!(f, "`<`"),
+            Self::RAngle => write!(f, "`>`"),
             Self::Literal(op) => match op {
                 Literal::Byte(byte) => write!(f, "byte `{}`", byte),
                 Literal::Word(word) => write!(f, "word `{}`", word),

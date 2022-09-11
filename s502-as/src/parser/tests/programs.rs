@@ -16,7 +16,7 @@ fn empty_program() {
         included: source_name.clone(),
         loc: Location {
             span: 0..1,
-            name: "<test harness>".to_string(),
+            file_name: "<test harness>".to_string(),
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
@@ -45,7 +45,7 @@ fn two_programs() {
         included: source_name.clone(),
         loc: Location {
             span: 0..1,
-            name: "<test harness>".to_string(),
+            file_name: "<test harness>".to_string(),
         },
     }];
     let mut id_table = HashMap::<String, usize>::new();
