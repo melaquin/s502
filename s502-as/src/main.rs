@@ -1,3 +1,5 @@
+#[cfg(fuzzing)]
+extern crate afl;
 #[macro_use]
 extern crate indoc;
 
@@ -19,6 +21,8 @@ mod ast;
 mod error;
 mod parser;
 
+/// The normal entry point for running.
+#[cfg(not(fuzzing))]
 fn main() {
     let matches = command!()
         .about("An assembler for the MOS 6502")
@@ -202,4 +206,41 @@ fn main() {
             }
         }
     }
+}
+
+/// The entry point used for fuzzing with `afl.rs`.
+#[cfg(fuzzing)]
+fn main() {
+    use afl::fuzz;
+
+    fuzz!(|data: &[u8]| {
+        // Create context for parsing.
+
+        let file_name = String::from("AFL input");
+        let source = match String::from_utf8(data.to_vec()) {
+            Err(_) => return,
+            Ok(string) => string,
+        };
+        let mut files = SimpleFiles::<String, String>::new();
+        let mut include_stack = vec![Include {
+            included: file_name.clone(),
+            loc: Location {
+                span: 0..1,
+                file_name: "<command line>".to_string(),
+            },
+        }];
+
+        let mut id_table = HashMap::<String, usize>::new();
+
+        let parser_context = parser::ParserContext::new(
+            file_name.clone(),
+            &source,
+            &mut files,
+            &mut include_stack,
+            &mut id_table,
+        );
+
+        // Fuzz the parser.
+        let program_result = parser_context.parse_program();
+    })
 }
