@@ -1,7 +1,7 @@
 #[test]
 fn test_labels_file() {
     let output = test_bin::get_test_bin("s502-as")
-        .arg("testfiles/labels.65a")
+        .arg("test_inputs/labels.65a")
         .output()
         .expect("failed to start s502-as");
 
@@ -11,7 +11,7 @@ fn test_labels_file() {
 #[test]
 fn test_labels_with_comments() {
     let output = test_bin::get_test_bin("s502-as")
-        .arg("testfiles/labels_with_comments.65a")
+        .arg("test_inputs/labels_with_comments.65a")
         .output()
         .expect("failed to start s502-as");
 

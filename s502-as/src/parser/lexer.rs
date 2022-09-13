@@ -23,10 +23,11 @@ fn lex_number(lex: &mut Lexer<Token>) -> Option<Literal> {
         _ => 10,
     };
     let number_string = if base == 10 {
-        &lex.slice()
+        lex.slice()
     } else {
         &lex.slice()[1..]
-    };
+    }
+    .replace("_", "");
 
     // numbers that fit into a byte can be padded with 0s to take a word.
     let is_word = match base {
@@ -60,7 +61,7 @@ fn lex_number(lex: &mut Lexer<Token>) -> Option<Literal> {
         }
     };
 
-    u16::from_str_radix(number_string, base)
+    u16::from_str_radix(&number_string, base)
         .map(|number| {
             if number > 255 || is_word {
                 Literal::Word(number)
@@ -222,10 +223,11 @@ pub enum Token {
     LAngle,
     #[token(">")]
     RAngle,
-    #[regex("\\$[0-9a-fA-F]+", lex_number)]
-    #[regex("%[0-1]+", lex_number)]
-    #[regex("@[0-7]+", lex_number)]
-    #[regex("[0-9]+", lex_number)]
+    // This accepts the entire alphabet instead of a-f to handle typos.
+    // For example, $FS is most like,y a typo for $FA or $FD, and if the
+    // rule only matched a-f then it would count S as a separate identfier.
+    #[regex(r#"[%@$][0-9a-zA-Z][0-9a-zA-Z_]*"#, lex_number)]
+    #[regex(r#"[0-9][0-9_]*"#, lex_number)]
     #[regex(r#""(\\[nt0"\\]|[^"\\])*""#, |lex| Literal::String(lex.slice()[1..lex.slice().len()-1].to_string()))]
     Literal(Literal),
     #[regex("[a-zA-Z][a-zA-Z_]*", |lex| lex.slice().to_string())]
@@ -331,68 +333,202 @@ impl fmt::Display for Token {
 mod tests {
     use super::*;
 
+    /// Test lex_number execution path:
+    /// base = 2
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() <= 8
+    /// from_str_radix is Ok
+    /// number <= 255
+    /// output is Literal:Byte
     #[test]
-    fn lexes_binary_numbers() {
-        let source = "%0 %10101 %000000111 %1011000010001111".to_string();
+    fn lex_binary_0() {
+        let source = "%1".to_string();
         let mut lexer = Token::lexer(&source);
 
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0b0)));
-        assert_eq!(
-            lexer.next().unwrap(),
-            Token::Literal(Literal::Byte(0b10101))
-        );
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0b111)));
-        assert_eq!(
-            lexer.next().unwrap(),
-            Token::Literal(Literal::Word(0b1011_0000_1000_1111))
-        );
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0b1)));
+    }
+
+    /// Test lex_number execution path:
+    /// base = 2
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() > 8 && number_string.len() <= 16
+    /// from_str_radix is Ok
+    /// output is Literal:Word
+    #[test]
+    fn lex_binary_1() {
+        let source = "%0_0000_0001".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0b1)));
+    }
+
+    /// Test lex_number execution path:
+    /// base = 2
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() > 16
+    #[test]
+    fn lex_binary_2() {
+        let source = "%0_0000_0000_0000_0001".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Error);
+    }
+
+    /// Test lex_number execution path:
+    /// base = 2
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() <= 8
+    /// from_str_radix is Err
+    #[test]
+    fn lex_binary_3() {
+        let source = "%12".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Error);
+    }
+
+    /// Test lex_number execution path:
+    /// base = 8
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() <= 3
+    /// from_str_radix is Ok
+    /// number <= 255
+    /// output is Literal:Byte
+    #[test]
+    fn lex_octal_0() {
+        let source = "@1".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0o1)));
+    }
+
+    /// Test lex_number execution path:
+    /// base = 8
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() > 3 && number_string.len() <= 16
+    /// from_str_radix is Ok
+    /// output is Literal:Word
+    #[test]
+    fn lex_octal_1() {
+        let source = "@0_001".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0b1)));
+    }
+
+    /// Test lex_number execution path:
+    /// base = 8
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() <= 3
+    /// from_str_radix is Ok
+    /// number > 255
+    /// output is Literal:Word
+    #[test]
+    fn lex_octal_2() {
+        let source = "@700".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0o700)));
+    }
+
+    /// Test lex_number execution path:
+    /// base = 8
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() > 6
+    #[test]
+    fn lex_octal_3() {
+        let source = "@2_101_0010".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Error);
+    }
+
+    /// Test lex_number execution path:
+    /// base = 10
+    /// number_string = &lex.slice()
+    /// number_string.len() <= 3
+    /// from_str_radix is Ok
+    /// number <= 255
+    /// output is Literal:Byte
+    #[test]
+    fn lex_decimal_0() {
+        let source = "1".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(1)));
+    }
+
+    /// Test lex_number execution path:
+    /// base = 10
+    /// number_string = &lex.slice()
+    /// number_string.len() > 3 && number_string.len() <= 5
+    /// from_str_radix is Ok
+    /// output is Literal:Word
+    #[test]
+    fn lex_decimal_1() {
+        let source = "1000".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(1000)));
+    }
+
+    /// Test lex_number execution path:
+    /// base = 10
+    /// number_string = &lex.slice()
+    /// number_string.len() > 5
+    #[test]
+    fn lex_decimal_2() {
+        let source = "109_000".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Error);
+    }
+
+    /// Test lex_number execution path:
+    /// base = 16
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() <= 2
+    /// from_str_radix is Ok
+    /// number <= 255
+    /// output is Literal:Byte
+    #[test]
+    fn lex_hex_0() {
+        let source = "$A".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0xA)));
+    }
+
+    /// Test lex_number execution path:
+    /// base = 16
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len() > 2 && number_string.len() <= 4
+    /// from_str_radix is Ok
+    /// output is Literal:Word
+    #[test]
+    fn lex_hex_1() {
+        let source = "$100".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0x100)));
+    }
+
+    /// Test lex_number execution path:
+    /// base = 16
+    /// number_string = &lex.slice()[1..]
+    /// number_string.len()> 4
+    /// from_str_radix is Ok
+    /// output is Literal:Word
+    #[test]
+    fn lex_hex_2() {
+        let source = "$1_0000".to_string();
+        let mut lexer = Token::lexer(&source);
+
+        assert_eq!(lexer.next().unwrap(), Token::Error);
     }
 
     #[test]
-    fn lexes_octal_numbers() {
-        let source = "@0 @273 @00101 @473".to_string();
-        let mut lexer = Token::lexer(&source);
-
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0o0)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0o273)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0o101)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0o473)));
-    }
-
-    #[test]
-    fn lexes_decimal_numbers() {
-        let source = "0 2 255 256 65535".to_string();
-        let mut lexer = Token::lexer(&source);
-
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(2)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(255)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(256)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(65535)));
-    }
-
-    #[test]
-    fn lexes_hex_numbers() {
-        let source = "$0 $3D $7F $101 $beef".to_string();
-        let mut lexer = Token::lexer(&source);
-
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0x3D)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Byte(0x7F)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0x101)));
-        assert_eq!(lexer.next().unwrap(), Token::Literal(Literal::Word(0xbeef)));
-    }
-
-    #[test]
-    fn rejects_bad_numbers() {
-        let source = "%11000100010001000 @401201 000000 $2D3C8".to_string();
-        let mut lexer = Token::lexer(&source);
-
-        assert!(lexer.all(|token| token == Token::Error));
-    }
-
-    #[test]
-    fn lexes_string() {
+    fn lex_string() {
         let source = "\"test\"".to_string();
         let mut lexer = Token::lexer(&source);
 
