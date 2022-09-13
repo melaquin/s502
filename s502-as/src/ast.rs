@@ -23,21 +23,21 @@ impl<T> Spanned<T> {
     }
 }
 
-/// Convenience for easily working with the node.
-impl<T> std::ops::Deref for Spanned<T> {
-    type Target = T;
+// /// Convenience for easily working with the node.
+// impl<T> std::ops::Deref for Spanned<T> {
+//     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        &self.val
-    }
-}
+//     fn deref(&self) -> &Self::Target {
+//         &self.val
+//     }
+// }
 
-/// Convenience for easily working with the node.
-impl<T> std::ops::DerefMut for Spanned<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.val
-    }
-}
+// /// Convenience for easily working with the node.
+// impl<T> std::ops::DerefMut for Spanned<T> {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         &mut self.val
+//     }
+// }
 
 /// Information for retrieving an except from the
 /// source code when reporting a parsing error.
@@ -184,6 +184,7 @@ pub enum Mnemonic {
 }
 
 impl Mnemonic {
+    #[cfg(not(tarpaulin_include))]
     pub fn is_implied(&self) -> bool {
         self == &Mnemonic::Brk
             || self == &Mnemonic::Clc

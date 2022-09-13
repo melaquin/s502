@@ -241,6 +241,7 @@ pub enum Token {
 }
 
 impl fmt::Display for Token {
+    #[cfg(not(tarpaulin_include))]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Adc => write!(f, "`adc`"),

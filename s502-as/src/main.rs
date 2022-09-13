@@ -23,6 +23,7 @@ mod parser;
 
 /// The normal entry point for running.
 #[cfg(not(fuzzing))]
+#[cfg(not(tarpaulin_include))]
 fn main() {
     let matches = command!()
         .about("An assembler for the MOS 6502")
@@ -210,6 +211,7 @@ fn main() {
 
 /// The entry point used for fuzzing with `afl.rs`.
 #[cfg(fuzzing)]
+#[cfg(not(tarpaulin_include))]
 fn main() {
     use afl::fuzz;
 

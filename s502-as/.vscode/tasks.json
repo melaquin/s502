@@ -35,6 +35,23 @@
 				"fuzzing"
 			],
 			"label": "cargo afl build"
+		},
+		{
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"tarpaulin",
+				"--out",
+				"html",
+				"--output-dir",
+				".coverage",
+				"--target-dir",
+				"../target/tarpaulin"
+			],
+			"group": {
+				"kind": "test"
+			},
+			"label": "cargo tarpaulin"
 		}
 	]
 }
