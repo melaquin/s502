@@ -21,7 +21,6 @@
 			],
 			"group": {
 				"kind": "test",
-				"isDefault": true
 			},
 			"label": "cargo test"
 		},
@@ -41,15 +40,23 @@
 			"command": "cargo",
 			"args": [
 				"tarpaulin",
+				"--color",
+				"never",
 				"--out",
 				"html",
 				"--output-dir",
 				".coverage",
 				"--target-dir",
-				"../target/tarpaulin"
+				"../target/tarpaulin",
+				">",
+				".coverage/report.txt",
 			],
 			"group": {
-				"kind": "test"
+				"kind": "test",
+				"isDefault": true
+			},
+			"presentation": {
+				"reveal": "never",
 			},
 			"label": "cargo tarpaulin"
 		}

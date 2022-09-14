@@ -319,15 +319,11 @@ impl<'source, 'context> ParserContext<'source, 'context> {
     }
 
     fn parse_mnemonic(&mut self) -> Option<(Mnemonic, Range<usize>)> {
-        let mnemonic_result = self
+        let mnemonic = self
             .lexer
             .peek()
-            .map(|(token, _)| Mnemonic::try_from(token))?;
-
-        let mnemonic = match mnemonic_result {
-            Ok(mnemonic) => mnemonic,
-            Err(()) => return None,
-        };
+            .map(|(token, _)| Mnemonic::try_from(token))?
+            .ok()?;
 
         // SAFETY This unwrap is safe because the function returns if peeking returned None.
         let (_, mnemonic_span) = self.lexer.next().unwrap();
@@ -362,6 +358,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             )),
             Token::Immediate => {
                 // Immediate address mode, only a value follows.
+                let operand_start = first_span.start;
                 let (modifier, value) = self.parse_modified_value()?.ok_or(AssemblerError {
                     message: "Expected value after `#`".to_string(),
                     labels: vec![(
@@ -373,12 +370,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                     )],
                     help: None,
                 })?;
-                // Get the span before moving the value into the Operand.
-                let operand_start = if let Some(spanned_modifier) = modifier.as_ref() {
-                    spanned_modifier.span.start
-                } else {
-                    value.span.start
-                };
+                // Get the span end before moving the value into the Operand.
                 let operand_end = value.span.end;
                 Spanned::new((
                     Operand {
@@ -737,7 +729,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                                 // before parse_program and subsequently handle_include are called.
                                 file_name: self.include_stack.last().unwrap().included.clone(),
                             },
-                            Some(format!("Could not include {}", to_include_name)),
+                            Some(format!("Could not include \"{}\"", to_include_name)),
                         ),
                         (
                             Location {
@@ -767,7 +759,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                 return (
                     None,
                     Err(vec![AssemblerError {
-                        message: format!("Could not read {}: {}", to_include_name, error),
+                        message: format!("Could not include \"{}\": {}", to_include_name, error),
                         labels: vec![(
                             Location {
                                 span: to_include_span,
@@ -846,6 +838,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
 impl TryFrom<&Token> for Mnemonic {
     type Error = ();
 
+    #[cfg(not(tarpaulin_include))]
     fn try_from(value: &Token) -> Result<Self, Self::Error> {
         match value {
             Token::Adc => Ok(Mnemonic::Adc),
