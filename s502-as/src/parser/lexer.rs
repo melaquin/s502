@@ -228,14 +228,14 @@ pub enum Token {
     // rule only matched a-f then it would count S as a separate identfier.
     #[regex(r#"[%@$][0-9a-zA-Z][0-9a-zA-Z_]*"#, lex_number)]
     #[regex(r#"[0-9][0-9_]*"#, lex_number)]
-    #[regex(r#""(\\[nt0"\\]|[^"\\])*""#, |lex| Literal::String(lex.slice()[1..lex.slice().len()-1].to_string()))]
+    #[regex(r#""(\\[nif"0\\]|[^"\\])*""#, |lex| Literal::String(lex.slice()[1..lex.slice().len()-1].to_string()))]
     Literal(Literal),
-    #[regex("[a-zA-Z][a-zA-Z_]*", |lex| lex.slice().to_string())]
+    #[regex("[a-zA-Z][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     Ident(String),
     #[regex("\n")]
     Eol,
     #[error]
-    #[regex("[*].*\n", logos::skip)]
+    #[regex("[*].*", logos::skip)]
     #[regex(r"[ \t]+", logos::skip)]
     Error,
 }
@@ -307,9 +307,9 @@ impl fmt::Display for Token {
             Self::Inl => write!(f, "`inl`"),
             Self::Org => write!(f, "`org`"),
             Self::Sct => write!(f, "`sct`"),
-            Self::A => write!(f, "`A`"),
-            Self::X => write!(f, "`X`"),
-            Self::Y => write!(f, "`Y`"),
+            Self::A => write!(f, "`a`"),
+            Self::X => write!(f, "`x`"),
+            Self::Y => write!(f, "`y`"),
             Self::Global => write!(f, "`!`"),
             Self::Period => write!(f, "`.`"),
             Self::Comma => write!(f, "`,`"),

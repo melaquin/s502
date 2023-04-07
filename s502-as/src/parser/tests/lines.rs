@@ -62,7 +62,6 @@ fn label_line() {
                 Label::Top(TopLabel {
                     name: "mylabel".to_string(),
                     visibility: Visibility::Object,
-                    sublabels: vec![],
                 }),
                 0..7
             ))),

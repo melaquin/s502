@@ -29,7 +29,39 @@ fn safe_include() {
     let included_result = parser_context.parse_instruction();
 
     assert!(included_result.is_ok());
-    assert_eq!(included_result.unwrap(), None);
+    assert_eq!(
+        included_result.unwrap(),
+        Some(Spanned::new((
+            Instruction {
+                mnemonic: Spanned::new((Mnemonic::Inl, 0..3)),
+                operand: Some(Spanned::new((
+                    Operand {
+                        mode: OperandMode::Immediate,
+                        modifier: None,
+                        value: Spanned::new((
+                            Value::Include((
+                                String::from("test_inputs/safe_include.65a"),
+                                vec![
+                                    Action::LineStart(0),
+                                    Action::Label(Spanned::new((
+                                        Label::Top(TopLabel {
+                                            name: String::from("mylabel"),
+                                            visibility: Visibility::Object
+                                        }),
+                                        0..7
+                                    ))),
+                                    Action::LineEnd(7)
+                                ]
+                            )),
+                            4..34
+                        ))
+                    },
+                    4..34
+                )))
+            },
+            0..34
+        )))
+    );
 }
 
 #[test]

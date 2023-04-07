@@ -1,4 +1,5 @@
 //! Parser that builds a syntax tree that represents the input assembly.
+//! The "tree" is really a sequence of actions for the generation stage to perform.
 
 pub mod lexer;
 #[cfg(test)]
@@ -22,6 +23,7 @@ pub struct ParserContext<'source, 'context> {
     id_table: &'context mut HashMap<String, usize>,
     program: Program,
     errors: Vec<AssemblerError>,
+    current_parent_label: Option<String>,
 }
 
 impl<'source, 'context> ParserContext<'source, 'context> {
@@ -40,14 +42,18 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             id_table,
             program: Program::with_capacity(256),
             errors: Vec::with_capacity(8),
+            current_parent_label: None,
         }
     }
 
     pub fn parse_program(mut self) -> Result<Program, Vec<AssemblerError>> {
         while self.lexer.peek().is_some() {
             // Tell the generation stage where this line starts.
-            self.program
-                .push(Action::LineStart(self.lexer.peek().unwrap().1.start));
+            if self.program.is_empty() {
+                self.program.push(Action::LineStart(0));
+            } else if let Some(Action::LineEnd(line_end)) = self.program.last() {
+                self.program.push(Action::LineStart(*line_end));
+            }
 
             match self.parse_line() {
                 // The line was empty, go on to the next one.
@@ -82,20 +88,39 @@ impl<'source, 'context> ParserContext<'source, 'context> {
 
         let instruction = self.parse_instruction()?;
 
-        if let Some(instruction) = instruction {
-            // It actualy ends here.
+        let included_program = if let Some(instruction) = instruction {
+            // The line might actualy end here.
             line_end = instruction.span.end;
-            self.program.push(Action::Instruction(instruction));
-        }
+
+            if let Mnemonic::Inl = instruction.val.mnemonic.val {
+                Some(
+                    if let Value::Include(included_program) =
+                        instruction.val.operand.unwrap().val.value.val
+                    {
+                        included_program
+                    } else {
+                        unreachable!()
+                    },
+                )
+            } else {
+                self.program.push(Action::Instruction(instruction));
+                None
+            }
+        } else {
+            None
+        };
 
         let eol_end = self.skip_to_eol();
 
         // Or, if there was a comment, then it actually ends there.
-        self.program.push(Action::LineEnd(if eol_end != 0 {
-            eol_end
-        } else {
-            line_end
-        }));
+        line_end = if eol_end != 0 { eol_end } else { line_end };
+        self.program.push(Action::LineEnd(line_end));
+
+        if let Some((included_name, mut included_program)) = included_program {
+            self.program.push(Action::PushInclude(included_name));
+            self.program.append(&mut included_program);
+            self.program.push(Action::PopInclude);
+        }
 
         Ok(())
     }
@@ -105,7 +130,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
     fn parse_label(&mut self) -> Result<Option<Spanned<Label>>, AssemblerError> {
         // Only want to parse a label if we see one of these four tokens, otherwise
         // there is no label to parse.
-        let (mut token, mut span) = match self.lexer.next_if(|(token, _)| {
+        let (mut token, mut main_span) = match self.lexer.next_if(|(token, _)| {
             matches!(token, Token::Global)
                 || matches!(token, Token::Period)
                 || matches!(token, Token::Ident { .. })
@@ -116,14 +141,14 @@ impl<'source, 'context> ParserContext<'source, 'context> {
 
         // A label  may start with either `!`, indicating that it should be exported,
         // or `.`, indicating that it is a sublabel of the most recent top-level label.
-        let (vis, sublabel) = match token {
+        let (visibility_span, first_period_span) = match token {
             Token::Global => {
-                let attributes = (Some(span.clone()), None);
-                (token, span) = self.lexer.next().ok_or(AssemblerError {
+                let attributes = (Some(main_span.clone()), None);
+                (token, main_span) = self.lexer.next().ok_or(AssemblerError {
                     message: "Unexpected end of file, expected a label".to_string(),
                     labels: vec![(
                         Location {
-                            span,
+                            span: main_span,
                             file_name: self.file_name.clone(),
                         },
                         None,
@@ -133,12 +158,12 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                 attributes
             }
             Token::Period => {
-                let attributes = (None, Some(span.clone()));
-                (token, span) = self.lexer.next().ok_or(AssemblerError {
+                let attributes = (None, Some(main_span.clone()));
+                (token, main_span) = self.lexer.next().ok_or(AssemblerError {
                     message: "Unexpected end of file, expected a label".to_string(),
                     labels: vec![(
                         Location {
-                            span,
+                            span: main_span,
                             file_name: self.file_name.clone(),
                         },
                         None,
@@ -158,7 +183,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                     message: format!("Unexpected token {}", token),
                     labels: vec![(
                         Location {
-                            span,
+                            span: main_span,
                             file_name: self.file_name.clone(),
                         },
                         Some("Expected a label".to_string()),
@@ -168,45 +193,159 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             }
         };
 
-        Ok(Some(if let Some(period_span) = sublabel {
-            Spanned::new((Label::Sub(identifier), period_span.start..span.end))
-            // TODO keeping this for reference later when the generation stage deals with this.
-            // // Check that there is actually a top-level label to add this to.
-            // self.labels
-            //     .last_mut()
-            //     .ok_or(AssemblerError {
-            //         span: period_span.start..span.end,
-            //         message: format!("Sublabel without top-level label"),
-            //         note: Some(format!(
-            //             "No top level label has been created for `{}` to go under",
-            //             identifier
-            //         )),
-            //     })?
-            //     .sublabels
-            //     .push(SubLabel {
-            //         name: identifier,
-            //         span: period_span.start..span.end,
-            //     });
-        } else {
-            Spanned::new((
-                Label::Top(TopLabel {
-                    name: identifier,
-                    visibility: if vis.is_some() {
-                        Visibility::Global
-                    } else {
-                        Visibility::Object
-                    },
-                    sublabels: vec![],
-                }),
-                span,
+        // A top level label may explicitly prefix a sublabel if wanted for clarity.
+        let sublabel_period = self
+            .lexer
+            .next_if(|(token, _)| matches!(token, Token::Period));
+
+        let sublabel_identifier = if let Some((_, sublabel_period_span)) = sublabel_period {
+            // Expect an identifier to follow.
+            let (sublabel_identifier, sublabel_identifier_span) = match self
+                .lexer
+                .next_if(|(token, _)| matches!(token, Token::Ident { .. }))
+            {
+                Some(next) => next,
+                None => {
+                    return Err(AssemblerError {
+                        message: "Expected a label after `.`".to_string(),
+                        labels: vec![(
+                            Location {
+                                span: sublabel_period_span,
+                                file_name: self.file_name.clone(),
+                            },
+                            None,
+                        )],
+                        help: None,
+                    })
+                }
+            };
+
+            // Don't allow nested sublabels.
+            if let Some(first_period_span) = first_period_span {
+                return Err(AssemblerError {
+                    message: format!(
+                        "Cannot nest sublabel {} under {}",
+                        sublabel_identifier, identifier
+                    ),
+                    labels: vec![
+                        (
+                            Location {
+                                span: sublabel_period_span.start..sublabel_identifier_span.end,
+                                file_name: self.file_name.clone(),
+                            },
+                            Some("Nested sublabels are not allowed".to_string()),
+                        ),
+                        (
+                            Location {
+                                span: first_period_span.start..main_span.end,
+                                file_name: self.file_name.clone(),
+                            },
+                            Some("sublabel already created here".to_string()),
+                        ),
+                    ],
+                    help: None,
+                });
+            } else if let Some((_, nested_sublabel_period_span)) = self
+                .lexer
+                .next_if(|(token, _)| matches!(token, Token::Period))
+            {
+                // The parent label was explicitly specified *and* there is a second (nested) sublabel.
+                // Expect an identifier follow.
+                let nested_sublabel_span_end = match self
+                    .lexer
+                    .next_if(|(token, _)| matches!(token, Token::Ident { .. }))
+                {
+                    Some((_, identifier_span)) => identifier_span.end,
+                    None => nested_sublabel_period_span.end,
+                };
+
+                return Err(AssemblerError {
+                    message: format!("Cannot nest sublabel under {}", sublabel_identifier),
+                    labels: vec![
+                        (
+                            Location {
+                                span: nested_sublabel_period_span.start..nested_sublabel_span_end,
+                                file_name: self.file_name.clone(),
+                            },
+                            Some("Nested sublabels are not allowed".to_string()),
+                        ),
+                        (
+                            Location {
+                                span: sublabel_period_span.start..sublabel_identifier_span.end,
+                                file_name: self.file_name.clone(),
+                            },
+                            Some("sublabel already created here".to_string()),
+                        ),
+                    ],
+                    help: None,
+                });
+            }
+
+            Some((
+                match sublabel_identifier {
+                    Token::Ident(ident) => ident,
+                    _ => unreachable!(),
+                },
+                sublabel_identifier_span,
             ))
-        }))
+        } else {
+            None
+        };
+
+        Ok(Some(
+            if let Some(sublabel_identifier) = sublabel_identifier {
+                if visibility_span.is_some() {
+                    return Err(AssemblerError {
+                        message: String::from("Cannot specify a global visibility with a sublabel"),
+                        labels: vec![(
+                            Location {
+                                span: visibility_span.unwrap(),
+                                file_name: self.file_name.clone(),
+                            },
+                            None,
+                        )],
+                        help: None,
+                    });
+                }
+                let label_span = main_span.start..sublabel_identifier.1.end;
+                Spanned::new((
+                    Label::Sub((
+                        Some(Spanned::new((identifier, main_span))),
+                        // NOTE Should this start with the nested sublabel period span start?
+                        // Depends on if we will actually use it.
+                        Spanned::new(sublabel_identifier),
+                    )),
+                    label_span,
+                ))
+            } else if let Some(period_span) = first_period_span {
+                let label_span = period_span.start..main_span.end;
+                Spanned::new((
+                    Label::Sub((None, Spanned::new((identifier, main_span)))),
+                    label_span,
+                ))
+            } else {
+                self.current_parent_label = Some(identifier.clone());
+                Spanned::new((
+                    Label::Top(TopLabel {
+                        name: identifier,
+                        visibility: if visibility_span.is_some() {
+                            Visibility::Global
+                        } else {
+                            Visibility::Object
+                        },
+                    }),
+                    main_span,
+                ))
+            },
+        ))
     }
 
     fn parse_instruction(&mut self) -> Result<Option<Spanned<Instruction>>, AssemblerError> {
         let parsed_mnemonic = self.parse_mnemonic();
+        let mut parsed_operand = None;
         // If mnemonic is implied then don't try to parse what follows
         // an operand, return and let parse_line skip it as a comment.
+        // TODO probably get rid of all these if lets and just return none if mnemonic is none
         if let Some(ref mnemonic) = parsed_mnemonic {
             if mnemonic.0.is_implied() {
                 return Ok(Some(Spanned::new((
@@ -217,8 +356,8 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                     mnemonic.1.clone(),
                 ))));
             }
+            parsed_operand = self.parse_operand()?;
         }
-        let parsed_operand = self.parse_operand()?;
 
         // Handle the include directive here so the nested parser can give its Items to the generation stage.
         // Other directives will be handled in that stage.
@@ -241,27 +380,40 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                     // Expect the included file extension to be 65a.
                     return match Path::new(&to_include_name).extension() {
                         Some(extension) if extension == "65a" => {
-                            let (included_id, parse_result) = self.handle_include(
+                            let (included_name, parse_result) = self.handle_include(
                                 to_include_name,
                                 mnemonic_span.start..to_include_span.end,
                             );
-                            // Push included file's ID before its code so the generation stage knows what file it's in.
-                            if let Some(id) = included_id {
-                                self.program.push(Action::PushInclude(id));
+
+                            if let Err(mut included_errors) = parse_result {
+                                self.errors.append(&mut included_errors);
+                                return Ok(None);
                             }
-                            match parse_result {
-                                Ok(mut included_program) => {
-                                    self.program.append(&mut included_program)
-                                }
-                                Err(mut included_errors) => {
-                                    self.errors.append(&mut included_errors)
-                                }
-                            }
-                            // And the generation stage needs to know when the included file ends.
-                            if included_id.is_some() {
-                                self.program.push(Action::PopInclude);
-                            }
-                            Ok(None)
+
+                            // None of these spans are ever actually used because parse_line will
+                            // check for an Inl mnemonic and not include it in the Program. Do
+                            // this because the operand is an entire included file and Locaiton
+                            // cannot span multiple files.
+                            Ok(Some(Spanned::new((
+                                Instruction {
+                                    mnemonic: Spanned::new((Mnemonic::Inl, mnemonic_span.clone())),
+                                    operand: Some(Spanned::new((
+                                        Operand {
+                                            mode: OperandMode::Immediate,
+                                            modifier: None,
+                                            value: Spanned::new((
+                                                Value::Include((
+                                                    included_name.unwrap(),
+                                                    parse_result.unwrap(),
+                                                )),
+                                                to_include_span.clone(),
+                                            )),
+                                        },
+                                        to_include_span.clone(),
+                                    ))),
+                                },
+                                mnemonic_span.start..to_include_span.end,
+                            ))))
                         }
                         // Wrong or no extension, error.
                         _ => Err(AssemblerError {
@@ -325,7 +477,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             .map(|(token, _)| Mnemonic::try_from(token))?
             .ok()?;
 
-        // SAFETY This unwrap is safe because the function returns if peeking returned None.
+        // SAFETY This unwrap is safe because the function returns if peek returned None.
         let (_, mnemonic_span) = self.lexer.next().unwrap();
 
         Some((mnemonic, mnemonic_span))
@@ -340,6 +492,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                 || matches!(token, Token::LParen)
                 || matches!(token, Token::LAngle)
                 || matches!(token, Token::RAngle)
+                || matches!(token, Token::Period)
         }) {
             Some(next) => next,
             None => return Ok(None),
@@ -383,31 +536,141 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             }
             Token::LAngle => {
                 // Parsed modifier, expect value to follow.
-                let operand_start = first_span.start;
                 let value = self.expect_value(first_span.clone())?;
-                let operand_end = value.span.end;
-                Spanned::new((
-                    Operand {
-                        mode: OperandMode::Address,
-                        modifier: Some(Spanned::new((Modifier::HighByte, first_span))),
-                        value,
-                    },
-                    operand_start..operand_end,
-                ))
+                let value_end = value.span.end;
+
+                let modifier = Some(Spanned::new((Modifier::HighByte, first_span.clone())));
+
+                let (peeked_token, _) = match self.lexer.peek() {
+                    None => {
+                        // Plain absolute or zeropage operand.
+                        return Ok(Some(Spanned::new((
+                            Operand {
+                                mode: OperandMode::Address,
+                                modifier,
+                                value,
+                            },
+                            first_span.start..value_end,
+                        ))));
+                    }
+                    Some(peeked_spanned_token) => peeked_spanned_token,
+                };
+
+                match peeked_token {
+                    // May be abs,_ or zpg,_ indexed mode.
+                    Token::Comma => {
+                        let (_, comma_span) = self.lexer.next().unwrap();
+                        match self.lexer.next() {
+                            Some((Token::X, x_span)) => Spanned::new((
+                                Operand {
+                                    mode: OperandMode::XIndexed,
+                                    modifier,
+                                    value,
+                                },
+                                first_span.start..x_span.end,
+                            )),
+                            Some((Token::Y, y_span)) => Spanned::new((
+                                Operand {
+                                    mode: OperandMode::YIndexed,
+                                    modifier,
+                                    value,
+                                },
+                                first_span.start..y_span.end,
+                            )),
+                            _ => {
+                                return Err(AssemblerError {
+                                    message: "Expected `x` or `y` after `,`".to_string(),
+                                    labels: vec![(
+                                        Location {
+                                            span: comma_span,
+                                            file_name: self.file_name.clone(),
+                                        },
+                                        None,
+                                    )],
+                                    help: None,
+                                })
+                            }
+                        }
+                    }
+                    // The token was something else, may be a comment or eol.
+                    _ => Spanned::new((
+                        Operand {
+                            mode: OperandMode::Address,
+                            modifier,
+                            value,
+                        },
+                        first_span.start..value_end,
+                    )),
+                }
             }
             Token::RAngle => {
                 // Parsed modifier, expect value to follow.
-                let operand_start = first_span.start;
                 let value = self.expect_value(first_span.clone())?;
-                let operand_end = value.span.end;
-                Spanned::new((
-                    Operand {
-                        mode: OperandMode::Address,
-                        modifier: Some(Spanned::new((Modifier::LowByte, first_span))),
-                        value,
-                    },
-                    operand_start..operand_end,
-                ))
+                let value_end = value.span.end;
+
+                let modifier = Some(Spanned::new((Modifier::LowByte, first_span.clone())));
+
+                let (peeked_token, _) = match self.lexer.peek() {
+                    None => {
+                        // Plain absolute or zeropage operand.
+                        return Ok(Some(Spanned::new((
+                            Operand {
+                                mode: OperandMode::Address,
+                                modifier,
+                                value,
+                            },
+                            first_span.start..value_end,
+                        ))));
+                    }
+                    Some(peeked_spanned_token) => peeked_spanned_token,
+                };
+
+                match peeked_token {
+                    // May be abs,_ or zpg,_ indexed mode.
+                    Token::Comma => {
+                        let (_, comma_span) = self.lexer.next().unwrap();
+                        match self.lexer.next() {
+                            Some((Token::X, x_span)) => Spanned::new((
+                                Operand {
+                                    mode: OperandMode::XIndexed,
+                                    modifier,
+                                    value,
+                                },
+                                first_span.start..x_span.end,
+                            )),
+                            Some((Token::Y, y_span)) => Spanned::new((
+                                Operand {
+                                    mode: OperandMode::YIndexed,
+                                    modifier,
+                                    value,
+                                },
+                                first_span.start..y_span.end,
+                            )),
+                            _ => {
+                                return Err(AssemblerError {
+                                    message: "Expected `x` or `y` after `,`".to_string(),
+                                    labels: vec![(
+                                        Location {
+                                            span: comma_span,
+                                            file_name: self.file_name.clone(),
+                                        },
+                                        None,
+                                    )],
+                                    help: None,
+                                })
+                            }
+                        }
+                    }
+                    // The token was something else, may be a comment or eol.
+                    _ => Spanned::new((
+                        Operand {
+                            mode: OperandMode::Address,
+                            modifier,
+                            value,
+                        },
+                        first_span.start..value_end,
+                    )),
+                }
             }
             Token::LParen => {
                 // One of:
@@ -457,7 +720,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                                     )),
                                     _ => {
                                         return Err(AssemblerError {
-                                            message: "Expected `Y` after `,`".to_string(),
+                                            message: "Expected `y` after `,`".to_string(),
                                             labels: vec![(
                                                 Location {
                                                     span: comma_span,
@@ -496,7 +759,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                                 )),
                                 _ => {
                                     return Err(AssemblerError {
-                                        message: "Expected `)` after `X`".to_string(),
+                                        message: "Expected `)` after `x`".to_string(),
                                         labels: vec![(
                                             Location {
                                                 span: x_span,
@@ -510,7 +773,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                             },
                             _ => {
                                 return Err(AssemblerError {
-                                    message: "Expected `X` after `,`".to_string(),
+                                    message: "Expected `x` after `,`".to_string(),
                                     labels: vec![(
                                         Location {
                                             span: comma_span,
@@ -540,6 +803,64 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                     }
                 }
             }
+            Token::Period => {
+                // Expect an identifier to follow.
+                let (sublabel_identifier, sublabel_identifier_span) = match self
+                    .lexer
+                    .next_if(|(token, _)| matches!(token, Token::Ident { .. }))
+                {
+                    Some(next) => next,
+                    None => {
+                        return Err(AssemblerError {
+                            message: String::from("Expected a label after `.`"),
+                            labels: vec![(
+                                Location {
+                                    span: first_span,
+                                    file_name: self.file_name.clone(),
+                                },
+                                None,
+                            )],
+                            help: None,
+                        })
+                    }
+                };
+
+                let sublabel_identifier = match sublabel_identifier {
+                    Token::Ident(identifier) => identifier,
+                    _ => unreachable!(),
+                };
+
+                // first_span.end = sublabel_identifier_span.end;
+                let operand_span = first_span.start..sublabel_identifier_span.end;
+
+                let value = match &self.current_parent_label {
+                    Some(parent) => Value::Reference(format!("{}.{}", parent, sublabel_identifier)),
+                    None => {
+                        return Err(AssemblerError {
+                            message: String::from(
+                                "No parent label under which to refer to a sublabel",
+                            ),
+                            labels: vec![(
+                                Location {
+                                    span: operand_span,
+                                    file_name: self.file_name.clone(),
+                                },
+                                None,
+                            )],
+                            help: None,
+                        })
+                    }
+                };
+
+                Spanned::new((
+                    Operand {
+                        mode: OperandMode::Address,
+                        modifier: None,
+                        value: Spanned::new((value, operand_span.clone())),
+                    },
+                    operand_span,
+                ))
+            }
             _ => {
                 // The first token was either a literal or identifier. One of:
                 //   absolute
@@ -554,8 +875,6 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                         Token::Literal(Literal::Word(word)) => Value::Word(word),
                         Token::Literal(Literal::String(string)) => Value::String(string),
                         Token::Ident(ident) => Value::Reference(ident),
-                        // SAFETY This will not panic because the function will return if the token is not
-                        // a Literal or Ident.
                         _ => unreachable!(),
                     },
                     first_span.clone(),
@@ -597,7 +916,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
                             )),
                             _ => {
                                 return Err(AssemblerError {
-                                    message: "Expected `X` or `Y` after `,`".to_string(),
+                                    message: "Expected `x` or `y` after `,`".to_string(),
                                     labels: vec![(
                                         Location {
                                             span: comma_span,
@@ -632,7 +951,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
             // If there's a modifier then expect a value to follow.
             let modifier_span = modifier.span.clone();
             Ok(Some((Some(modifier), self.expect_value(modifier_span)?)))
-        } else if let Some(value) = self.parse_value() {
+        } else if let Some(value) = self.parse_value()? {
             Ok(Some((None, value)))
         } else {
             Ok(None)
@@ -664,7 +983,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
         &mut self,
         prefix_span: Range<usize>,
     ) -> Result<Spanned<Value>, AssemblerError> {
-        if let Some(value) = self.parse_value() {
+        if let Some(value) = self.parse_value()? {
             Ok(value)
         } else {
             // This is only ever called after a modifier was parsed.
@@ -683,23 +1002,84 @@ impl<'source, 'context> ParserContext<'source, 'context> {
     }
 
     /// Tries to parse a value.
-    fn parse_value(&mut self) -> Option<Spanned<Value>> {
-        let (value_token, value_span) = self.lexer.next_if(|(token, _)| {
-            matches!(token, Token::Literal { .. }) || matches!(token, Token::Ident { .. })
-        })?;
+    fn parse_value(&mut self) -> Result<Option<Spanned<Value>>, AssemblerError> {
+        // let next_token = self.lexer.next_if(|(token, _)| {
+        //     matches!(token, Token::Literal { .. })
+        //         || matches!(token, Token::Ident { .. })
+        //         || matches!(token, Token::Period)
+        // });
 
-        Some(Spanned::new((
+        let (value_token, mut value_span) = match self.lexer.next_if(|(token, _)| {
+            matches!(token, Token::Literal { .. })
+                || matches!(token, Token::Ident { .. })
+                || matches!(token, Token::Period)
+        }) {
+            Some(next) => next,
+            None => return Ok(None),
+        };
+
+        Ok(Some(Spanned::new((
             match value_token {
                 Token::Literal(Literal::Byte(byte)) => Value::Byte(byte),
                 Token::Literal(Literal::Word(word)) => Value::Word(word),
                 Token::Literal(Literal::String(string)) => Value::String(string),
                 Token::Ident(ident) => Value::Reference(ident),
-                // SAFETY This will not panic because the function will return if the token is not
-                // a Literal or Ident.
+                Token::Period => {
+                    // Expect an identifier to follow.
+                    let (sublabel_identifier, sublabel_identifier_span) = match self
+                        .lexer
+                        .next_if(|(token, _)| matches!(token, Token::Ident { .. }))
+                    {
+                        Some(next) => next,
+                        None => {
+                            return Err(AssemblerError {
+                                message: String::from("Expected a label after `.`"),
+                                labels: vec![(
+                                    Location {
+                                        span: value_span,
+                                        file_name: self.file_name.clone(),
+                                    },
+                                    None,
+                                )],
+                                help: None,
+                            })
+                        }
+                    };
+
+                    let sublabel_identifier = match sublabel_identifier {
+                        Token::Ident(identifier) => identifier,
+                        _ => unreachable!(),
+                    };
+                    value_span.end = sublabel_identifier_span.end;
+
+                    let value = match &self.current_parent_label {
+                        Some(parent) => {
+                            Value::Reference(format!("{}.{}", parent, sublabel_identifier))
+                        }
+                        None => {
+                            return Err(AssemblerError {
+                                message: String::from(
+                                    "No parent label under which to refer to a sublabel",
+                                ),
+                                labels: vec![(
+                                    Location {
+                                        span: value_span,
+                                        file_name: self.file_name.clone(),
+                                    },
+                                    None,
+                                )],
+                                help: None,
+                            })
+                        }
+                    };
+
+                    // Ok(Some(Spanned::new((value, value_span))))
+                    value
+                }
                 _ => unreachable!(),
             },
             value_span,
-        )))
+        ))))
     }
 
     /// Read and parse an included file, preventing circular inclusion.
@@ -709,7 +1089,7 @@ impl<'source, 'context> ParserContext<'source, 'context> {
         &mut self,
         to_include_name: String,
         to_include_span: Range<usize>,
-    ) -> (Option<usize>, Result<Program, Vec<AssemblerError>>) {
+    ) -> (Option<String>, Result<Program, Vec<AssemblerError>>) {
         // Check if the file has already been parsed. If it has then it would loop back
         // to this file and cause infinite recursion.
         if let Some(include) = self
@@ -802,9 +1182,10 @@ impl<'source, 'context> ParserContext<'source, 'context> {
         let _ = self.include_stack.pop();
         // And add it to the map if it hasn't been included before.
         if !self.id_table.contains_key(&to_include_name) {
-            self.id_table.insert(to_include_name, included_file_id);
+            self.id_table
+                .insert(to_include_name.clone(), included_file_id);
         }
-        (Some(included_file_id), parse_result)
+        (Some(to_include_name), parse_result)
     }
 
     /// Skip past the end of the line after it is done being parsed.

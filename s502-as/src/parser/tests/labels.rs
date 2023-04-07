@@ -33,7 +33,6 @@ fn plain() {
         Label::Top(TopLabel {
             name: "mylabel".to_string(),
             visibility: Visibility::Object,
-            sublabels: vec![],
         })
     );
 }
@@ -68,7 +67,6 @@ fn global() {
         Label::Top(TopLabel {
             name: "yourlabel".to_string(),
             visibility: Visibility::Global,
-            sublabels: vec![],
         })
     );
 }
@@ -100,7 +98,7 @@ fn sublabel() {
 
     assert_eq!(
         sublabel.unwrap().unwrap().val,
-        Label::Sub("sublabel".to_string())
+        Label::Sub((None, Spanned::new(("sublabel".to_string(), 1..9))))
     );
 }
 

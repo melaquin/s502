@@ -9,7 +9,9 @@ clap = { version = "3.2.12", features = ["cargo"] }
 codespan-reporting = "0.11.1"
 enum-map = "2.4.1"
 indoc = "1.0.7"
+lazy_static = "1.4.0"
 logos = "0.12.1"
+phf = { version = "0.11", features = ["macros"] }
 
 [dev-dependencies]
 test_bin = "0.4.0"

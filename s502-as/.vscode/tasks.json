@@ -33,6 +33,12 @@
 				"--features",
 				"fuzzing"
 			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "build",
+			},
 			"label": "cargo afl build"
 		},
 		{
@@ -48,6 +54,8 @@
 				".coverage",
 				"--target-dir",
 				"../target/tarpaulin",
+				"--",
+				"--test-threads=16",
 				">",
 				".coverage/report.txt",
 			],

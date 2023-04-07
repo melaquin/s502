@@ -498,7 +498,7 @@ fn missing_comma_ind_y() {
     assert_eq!(
         operand,
         Err(AssemblerError {
-            message: String::from("Expected `Y` after `,`"),
+            message: String::from("Expected `y` after `,`"),
             labels: vec![(
                 Location {
                     span: 3..4,
@@ -537,7 +537,7 @@ fn missing_rparen_x_ind() {
     assert_eq!(
         operand,
         Err(AssemblerError {
-            message: String::from("Expected `)` after `X`"),
+            message: String::from("Expected `)` after `x`"),
             labels: vec![(
                 Location {
                     span: 3..4,
@@ -576,7 +576,7 @@ fn missing_x_x_ind() {
     assert_eq!(
         operand,
         Err(AssemblerError {
-            message: String::from("Expected `X` after `,`"),
+            message: String::from("Expected `x` after `,`"),
             labels: vec![(
                 Location {
                     span: 2..3,
@@ -654,7 +654,7 @@ fn index_no_x_y() {
     assert_eq!(
         operand,
         Err(AssemblerError {
-            message: String::from("Expected `X` or `Y` after `,`"),
+            message: String::from("Expected `x` or `y` after `,`"),
             labels: vec![(
                 Location {
                     span: 5..6,
